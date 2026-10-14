@@ -1,0 +1,22 @@
+name: APK veröffentlichen
+
+on:
+  push:
+    branches: [main]
+    paths: ["android/Stempeluhr.apk", ".github/workflows/release.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Als Download veröffentlichen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete app --yes --cleanup-tag || true
+          gh release create app android/Stempeluhr.apk --title "Stempeluhr (Version ${{ github.run_number }})" --notes "Auf dem Handy öffnen und installieren." --latest

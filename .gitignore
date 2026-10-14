@@ -1,0 +1,5 @@
+signing-*.pem
+android/app/classes.dex
+android/app/assets/index.html
+android/web/
+__pycache__/
