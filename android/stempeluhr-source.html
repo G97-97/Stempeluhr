@@ -165,9 +165,20 @@ button { cursor: pointer; }
 .abs-row { display: grid; grid-template-columns: minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr) 40px; gap: 6px; align-items: end; }
 .abs-row .field select, .abs-row .field input { padding: 8px 6px; font-size: 14px; }
 .abs-row .icon-btn { width: 40px; height: 46px; }
-.kd-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) 44px; gap: 6px 8px; align-items: end; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
-.kd-row .kd-name { grid-column: 1 / -1; }
-.kd-row .icon-btn { width: 44px; height: 46px; }
+.kd-tbl { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--surface); }
+.kd-cap { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 8px 8px 12px; background: var(--bg); border-bottom: 1px solid var(--line); }
+.kd-cap b { font-size: 14px; }
+.kd-cap small { color: var(--muted); font-size: 12.5px; font-weight: 500; margin-left: 6px; }
+.kd-plus { width: 40px; height: 40px; border-radius: 50%; border: 0; background: var(--accent); color: #fff; font-size: 26px; line-height: 1; display: grid; place-items: center; font-weight: 500; }
+.kd-tr { display: grid; grid-template-columns: minmax(0,1fr) 72px 72px 32px; gap: 4px; align-items: center; padding: 5px 6px; border-bottom: 1px solid var(--line); }
+.kd-tr:last-child { border-bottom: 0; }
+.kd-th { font-size: 12px; font-weight: 600; color: var(--muted); padding-top: 6px; padding-bottom: 6px; }
+.kd-th span { padding-left: 4px; }
+.kd-tr input { width: 100%; min-width: 0; min-height: 42px; border: 1px solid var(--line); background: var(--bg); border-radius: 10px; padding: 6px 6px; font-size: 15px; }
+.kd-tr input[type=time] { padding: 6px 2px; text-align: center; }
+.kd-tr input[type=time]::-webkit-calendar-picker-indicator { display: none; }
+.kd-tr .icon-btn { width: 32px; height: 42px; border-radius: 10px; }
+.kd-empty { padding: 12px; color: var(--muted); font-size: 13.5px; }
 
 .list { display: grid; }
 .li { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
@@ -817,10 +828,11 @@ function renderEditor(err) {
       <div class="field"><label for="e-af${i}">Von</label><input type="time" id="e-af${i}" data-abs="${i}" data-f="from" value="${esc(a.from || "")}"></div>
       <div class="field"><label for="e-ab${i}">Bis</label><input type="time" id="e-ab${i}" data-abs="${i}" data-f="to" value="${esc(a.to || "")}"></div>
       <button type="button" class="icon-btn" data-act="absdel" data-i="${i}" aria-label="Entfernen">${ICON.x}</button></div>`).join("");
-  const kdRows = rec.kunden.map((k, i) => `<div class="kd-row">
-      <div class="field kd-name"><label for="e-kn${i}">Kunde</label><input id="e-kn${i}" list="kd-list" autocomplete="off" data-kd="${i}" data-f="name" value="${esc(k.name || "")}"></div>
-      <div class="field"><label for="e-kf${i}">Von</label><input type="time" id="e-kf${i}" data-kd="${i}" data-f="from" value="${esc(k.from || "")}"></div>
-      <div class="field"><label for="e-kb${i}">Bis</label><input type="time" id="e-kb${i}" data-kd="${i}" data-f="to" value="${esc(k.to || "")}"></div>
+  const kdTot = rec.kunden.reduce((t, k) => t + kdDur(k), 0);
+  const kdRows = rec.kunden.map((k, i) => `<div class="kd-tr">
+      <input id="e-kn${i}" list="kd-list" autocomplete="off" placeholder="Kunde" aria-label="Kunde ${i + 1}" data-kd="${i}" data-f="name" value="${esc(k.name || "")}">
+      <input type="time" id="e-kf${i}" aria-label="Von" data-kd="${i}" data-f="from" value="${esc(k.from || "")}">
+      <input type="time" id="e-kb${i}" aria-label="Bis" data-kd="${i}" data-f="to" value="${esc(k.to || "")}">
       <button type="button" class="icon-btn" data-act="kdrowdel" data-i="${i}" aria-label="Entfernen">${ICON.x}</button></div>`).join("");
   const c = calc(ds, rec);
   openSheet(`${kdDatalist()}
@@ -835,9 +847,10 @@ function renderEditor(err) {
       <div class="grid4">
         ${["in", "ls", "le", "out"].map(k => `<div class="field"><label for="e-${k}">${STAMP_LABELS[k]}</label><input type="time" id="e-${k}" data-f="${k}" value="${esc(rec[k] || "")}"></div>`).join("")}
       </div>
-      <div class="lbl">Kunden (von – bis)</div>
-      ${kdRows || '<p class="hint">Keine.</p>'}
-      <button type="button" class="btn" data-act="kdrowadd">+ Kunde hinzufügen</button>
+      <div class="kd-tbl">
+        <div class="kd-cap"><b>Kunden${rec.kunden.length ? `<small>${rec.kunden.length} · ${hm(kdTot)} h</small>` : ""}</b><button type="button" class="kd-plus" data-act="kdrowadd" aria-label="Kunde hinzufügen">+</button></div>
+        ${rec.kunden.length ? `<div class="kd-tr kd-th"><span>Kunde</span><span>Von</span><span>Bis</span><span></span></div>${kdRows}` : '<div class="kd-empty">Noch keine Kunden. Mit + eine Zeile hinzufügen.</div>'}
+      </div>
       <div class="lbl">Stundenweise Abwesenheit (Arzt, Behörde …)</div>
       ${abs || '<p class="hint">Keine.</p>'}
       <button type="button" class="btn" data-act="absadd">+ Arztbesuch / Abwesenheit hinzufügen</button>
@@ -1053,7 +1066,13 @@ document.addEventListener("click", async e => {
       k.to = nowHM(); if (k.to === k.from) k.to = pad(Math.floor(((toMin(k.from) + 1) % 1440) / 60)) + ":" + pad((toMin(k.from) + 1) % 60);
       setRec(ds, r); toast(`${k.name}: ${hm(kdDur(k))} h eingetragen`, true); render(); break;
     }
-    case "kdrowadd": readDraftInputs(); draft.rec.kunden.push({ name: "", from: "", to: "" }); renderEditor(); break;
+    case "kdrowadd": {
+      readDraftInputs();
+      const ks = draft.rec.kunden, prev = ks[ks.length - 1];
+      ks.push({ name: "", from: (prev && prev.to) || (!ks.length && draft.rec.in) || "", to: "" });
+      renderEditor(); const n = $("e-kn" + (ks.length - 1)); if (n) { n.scrollIntoView({ block: "center" }); n.focus(); }
+      break;
+    }
     case "kdrowdel": readDraftInputs(); draft.rec.kunden.splice(+el.dataset.i, 1); renderEditor(); break;
     case "closesheet-btn": closeSheet(); break;
     case "absadd": readDraftInputs(); draft.rec.abs.push({ type: "arzt", from: "", to: "" }); renderEditor(); break;
