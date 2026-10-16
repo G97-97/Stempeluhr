@@ -165,6 +165,10 @@ button { cursor: pointer; }
 .abs-row { display: grid; grid-template-columns: minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr) 40px; gap: 6px; align-items: end; }
 .abs-row .field select, .abs-row .field input { padding: 8px 6px; font-size: 14px; }
 .abs-row .icon-btn { width: 40px; height: 46px; }
+.earn-out { display: grid; gap: 2px; margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: var(--bg); }
+.earn-out span { color: var(--muted); font-size: 13.5px; }
+.earn-out b { font-size: 26px; letter-spacing: -.01em; }
+.earn-out small { color: var(--muted); font-size: 12.5px; }
 .kd-tbl { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--surface); }
 .kd-cap { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 8px 8px 12px; background: var(--bg); border-bottom: 1px solid var(--line); }
 .kd-cap b { font-size: 14px; }
@@ -284,6 +288,7 @@ const nowMin = () => { const d = new Date(); return d.getHours() * 60 + d.getMin
 const hm = m => { const s = m < 0 ? "−" : ""; m = Math.abs(Math.round(m)); return `${s}${Math.floor(m / 60)}:${pad(m % 60)}`; };
 const hmSigned = m => (m > 0 ? "+" : "") + hm(m);
 const dec = m => (Math.round(m / 60 * 100) / 100).toFixed(2).replace(".", ",");
+const dec2 = v => v.toFixed(2).replace(".", ",");
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const monthName = (mk, region) => { const [y, m] = mk.split("-").map(Number); return `${(region === "DE" ? MONTHS_DE : MONTHS)[m - 1]} ${y}`; };
 const daysInMonth = mk => { const [y, m] = mk.split("-").map(Number); return new Date(y, m, 0).getDate(); };
@@ -427,6 +432,13 @@ function customerStats(mk) {
 }
 const kdDatalist = () => `<datalist id="kd-list">${knownCustomers().map(n => `<option value="${esc(n)}"></option>`).join("")}</datalist>`;
 
+const eur = v => v.toLocaleString("de-AT", { style: "currency", currency: "EUR" });
+const rateNum = () => { const v = parseFloat(String(S.settings.rate ?? "").replace(",", ".")); return isFinite(v) && v > 0 ? v : 0; };
+function earn(t) {
+  const basis = S.settings.rateBasis === "ist" ? "ist" : "worked", min = Math.max(0, basis === "ist" ? t.ist : t.worked);
+  return { basis, min, rate: rateNum(), sum: Math.round(min / 60 * rateNum() * 100) / 100 };
+}
+const earnLine = e => `${dec(e.min)} h × ${eur(e.rate)} = ${eur(e.sum)}`;
 /* ---------- Berechnung ---------- */
 function sollBase(ds) {
   if (holidayName(ds)) return 0;
@@ -685,8 +697,27 @@ function viewMonat() {
     </div>
   </section>
   ${(() => { const cs = customerStats(mk); return cs.length ? `<section class="card"><h2>Kunden im ${MONTHS[+mk.slice(5) - 1]}</h2><dl class="kv">${cs.map(e => `<dt>${esc(e.name)} <small style="color:var(--muted)">· ${e.n} Einsatz${e.n === 1 ? "" : "e"}</small></dt><dd>${hm(e.min)} h</dd>`).join("")}</dl></section>` : ""; })()}
-  <section class="days" aria-label="Tage">${rows}</section>`;
+  <section class="days" aria-label="Tage">${rows}</section>
+  ${(() => { const e = earn(t); return `<section class="card earn">
+    <h2>Verdienst im ${MONTHS[+mk.slice(5) - 1]}</h2>
+    <div class="grid2">
+      <div class="field"><label for="m-rate">Betrag pro Stunde (€)</label><input id="m-rate" inputmode="decimal" autocomplete="off" placeholder="z. B. 18,50" value="${esc(S.settings.rate ? String(S.settings.rate).replace(".", ",") : "")}"></div>
+      <div class="field"><label for="m-basis">Welche Stunden</label><select id="m-basis"><option value="worked" ${e.basis === "worked" ? "selected" : ""}>Gearbeitet</option><option value="ist" ${e.basis === "ist" ? "selected" : ""}>Mit Urlaub/Krank</option></select></div>
+    </div>
+    <div class="earn-out" id="earn-out">${earnOut(e)}</div>
+  </section>`; })()}`;
 }
+function earnOut(e) {
+  return e.rate ? `<span>${dec(e.min)} h × ${eur(e.rate)}</span><b>${eur(e.sum)}</b><small>Brutto, vor Steuern und Abgaben. Zählt Tage bis heute.</small>`
+    : `<small>Trag einen Betrag pro Stunde ein, dann wird der Gesamtbetrag für den Monat ausgerechnet.</small>`;
+}
+document.addEventListener("input", e => {
+  if (e.target.id !== "m-rate" && e.target.id !== "m-basis") return;
+  const v = $("m-rate").value.trim().replace(/[^\d,.]/g, "");
+  S.settings.rate = v.replace(",", "."); S.settings.rateBasis = $("m-basis").value;
+  $("earn-out").innerHTML = earnOut(earn(monthStats(viewMonth)));
+  clearTimeout(window.__rateT); window.__rateT = setTimeout(saveSettings, 600);
+});
 function lastDayOf(mk) { const l = `${mk}-${pad(daysInMonth(mk))}`; const t = todayDs(); return l < t ? l : t; }
 
 /* ---------- Ansicht: Abwesenheit ---------- */
@@ -974,6 +1005,8 @@ function buildCsv(mk) {
   L(["Pflegefreistellung (Tage)", t.pflege]); L(["Sonderurlaub (Tage)", t.sonder]); L(["Schulung / Berufsschule (Tage)", t.schule]);
   L(["Zeitausgleich (Tage)", t.za]); L(["Unbezahlter Urlaub (Tage)", t.unbezahlt]);
   L(["Arztbesuche (Anzahl)", t.arztN]); L(["Arztbesuche (h)", dec(t.arzt)]); L(["Kilometer gesamt", String(t.km).replace(".", ",")]);
+  const ea = earn(t);
+  if (ea.rate) { L([]); L(["Verdienst (brutto)"]); L(["Stunden (h)", dec(ea.min), ea.basis === "ist" ? "Ist-Stunden" : "geleistete Arbeitszeit"]); L(["Betrag pro Stunde (EUR)", dec2(ea.rate)]); L(["Gesamtbetrag (EUR)", dec2(ea.sum)]); }
   const cs = customerStats(mk);
   if (cs.length) {
     L([]); L(["Kundeneinsätze"]);
@@ -994,6 +1027,8 @@ function buildReport(mk) {
   if (t.sonder) lines.push(`Sonderurlaub: ${t.sonder} Tage`);
   if (t.unfall) lines.push(`Arbeitsunfall: ${t.unfall} Tage`);
   if (t.km) lines.push(`Dienstfahrten: ${String(t.km).replace(".", ",")} km`);
+  const ea = earn(t);
+  if (ea.rate) lines.push("", `Verdienst (brutto): ${earnLine(ea)}`);
   const abs = [];
   for (const ds of monthDays(mk)) { const c = calc(ds); if (c.kind !== "arbeit" && c.kind !== "feiertag" && c.soll > 0) abs.push(`${fmtShort(ds)} ${c.K.label}${c.rec.beleg ? " (Beleg)" : ""}`); for (const a of c.rec.abs || []) abs.push(`${fmtShort(ds)} ${(PARTIAL[a.type] || {}).label} ${a.from}–${a.to}`); }
   if (abs.length) lines.push("", "Abwesenheiten:", ...abs.map(x => "• " + x));
@@ -1216,7 +1251,7 @@ setInterval(() => {
   if (d.getMinutes() !== lastMinute) {
     lastMinute = d.getMinutes();
     if (todayDs() !== lastDay) { lastDay = todayDs(); viewMonth = lastDay.slice(0, 7); }
-    if (!$("sheet-root").innerHTML && (tab === "heute" || tab === "monat")) render();
+    if (!$("sheet-root").innerHTML && (tab === "heute" || tab === "monat") && !["m-rate", "m-basis"].includes((document.activeElement || {}).id)) render();
   }
 }, 1000);
 
