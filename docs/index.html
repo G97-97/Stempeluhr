@@ -266,6 +266,9 @@ button { cursor: pointer; }
 .abs-row { display: grid; grid-template-columns: minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr) 40px; gap: 6px; align-items: end; }
 .abs-row .field select, .abs-row .field input { padding: 8px 6px; font-size: 14px; }
 .abs-row .icon-btn { width: 40px; height: 46px; }
+.kd-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) 44px; gap: 6px 8px; align-items: end; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.kd-row .kd-name { grid-column: 1 / -1; }
+.kd-row .icon-btn { width: 44px; height: 46px; }
 
 .list { display: grid; }
 .li { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
@@ -497,6 +500,24 @@ async function connect() {
   } catch (e) { setSync("local"); }
 }
 
+/* ---------- Kunden ---------- */
+const kdDur = k => (k.from && k.to) ? ((toMin(k.to) - toMin(k.from)) + 1440) % 1440 : 0;
+const kdMin = (k, ds) => k.to ? kdDur(k) : (ds === todayDs() && k.from ? Math.max(0, nowMin() - toMin(k.from)) : 0);
+function knownCustomers() {
+  const m = new Map();
+  for (const mk in S.months) for (const dd in S.months[mk].days) for (const k of S.months[mk].days[dd].kunden || []) if (k.name) m.set(k.name, (m.get(k.name) || 0) + 1);
+  return [...m.entries()].sort((a, b) => b[1] - a[1]).map(x => x[0]);
+}
+function customerStats(mk) {
+  const m = new Map();
+  for (const ds of monthDays(mk)) {
+    const r = getRec(ds);
+    for (const k of (r && r.kunden) || []) { const e = m.get(k.name) || { name: k.name, min: 0, n: 0 }; e.min += kdMin(k, ds); e.n++; m.set(k.name, e); }
+  }
+  return [...m.values()].sort((a, b) => b.min - a.min);
+}
+const kdDatalist = () => `<datalist id="kd-list">${knownCustomers().map(n => `<option value="${esc(n)}"></option>`).join("")}</datalist>`;
+
 /* ---------- Berechnung ---------- */
 function sollBase(ds) {
   if (holidayName(ds)) return 0;
@@ -658,6 +679,13 @@ function viewHeute() {
   const kindChip = c.kind !== "arbeit" ? `<span class="chip ${c.K.cls}">${esc(c.hol && c.kind === "feiertag" ? c.hol : c.K.label)}</span>` : "";
   let warn = "";
   if (S.settings.pauseHinweis && c.worked > 360 && c.brk < 30 && c.state !== "pause") warn = `<div class="note">Mehr als 6 Stunden ohne 30 Minuten Pause. Gesetzlich ist ab 6 Stunden Arbeitszeit eine Ruhepause von mindestens 30 Minuten vorgeschrieben.</div>`;
+  const kd = r.kunden || [], kdRun = kd.findIndex(k => k.from && !k.to);
+  const kundenCard = `<section class="card">
+    <div class="row"><h2 style="margin:0">Kunden heute</h2>${kd.length ? `<span class="num" style="color:var(--muted);font-size:13px">${hm(kd.reduce((a, k) => a + kdMin(k, ds), 0))} h</span>` : ""}</div>
+    ${kd.length ? `<div class="list">${kd.map((k, i) => `<div class="li"><div><b>${esc(k.name)}</b>${k.to ? "" : ' <span class="chip k-work">läuft</span>'}<small class="num">${esc(k.from)}–${esc(k.to || "jetzt")} · ${hm(kdMin(k, ds))} h${k.note ? " · " + esc(k.note) : ""}</small></div>${k.to ? `<button class="btn ghost" data-act="edit" data-ds="${ds}" aria-label="Bearbeiten">${ICON.pen}</button>` : `<button class="btn primary" data-act="kdstop" data-i="${i}">Fertig</button>`}</div>`).join("")}</div>`
+      : `<p class="hint" style="margin:8px 0 0">Tippe auf „Beim Kunden angekommen“, wenn du bei einer Kundschaft anfängst. Die Zeit läuft, bis du „Fertig“ tippst.</p>`}
+    <div class="btn-row" style="margin-top:12px">${kdRun < 0 ? `<button class="btn primary grow" data-act="kdstart" data-ds="${ds}">Beim Kunden angekommen</button>` : ""}<button class="btn grow" data-act="kdadd" data-ds="${ds}">+ Nachtragen</button></div>
+  </section>`;
   const absToday = (r.abs || []).map(a => `<span class="chip k-violet">${esc((PARTIAL[a.type] || {}).label || a.type)} ${esc(a.from)}–${esc(a.to)}</span>`).join(" ");
 
   return `
@@ -670,6 +698,7 @@ function viewHeute() {
     ${absToday ? `<div class="btn-row">${absToday}</div>` : ""}
   </section>
   ${warn}
+  ${kundenCard}
   <section class="tiles">
     <div class="tile"><span>Arbeitszeit heute</span><b>${hm(c.worked + c.paidAbs - c.unpaid)}</b><small>Soll ${hm(c.soll)}</small></div>
     <div class="tile"><span>Pause heute</span><b>${hm(c.brk)}</b><small>${c.brk >= 30 || c.worked <= 360 ? "in Ordnung" : "unter 30 Min."}</small></div>
@@ -699,6 +728,7 @@ function viewMonat() {
     const tags = [];
     if (c.kind !== "arbeit") tags.push(`<span class="chip ${c.K.cls}">${esc(c.kind === "feiertag" && c.hol ? c.hol : c.K.label)}</span>`);
     if (c.rec.ort && c.rec.ort !== "betrieb") tags.push(`<span class="chip">${esc(ORTE[c.rec.ort] || c.rec.ort)}</span>`);
+    for (const k of c.rec.kunden || []) tags.push(`<span class="chip k-blue">${esc(k.name)} ${hm(kdMin(k, ds))}</span>`);
     for (const a of c.rec.abs || []) tags.push(`<span class="chip k-violet">${esc((PARTIAL[a.type] || {}).label || "")} ${hm(Math.max(0, toMin(a.to) - toMin(a.from)))}</span>`);
     if (c.incomplete) tags.push(`<span class="chip k-warn">Stempelung unvollständig</span>`);
     if (c.missing) tags.push(`<span class="chip k-red">Keine Zeiten</span>`);
@@ -745,6 +775,7 @@ function viewMonat() {
       <button class="btn grow" data-act="report">${ICON.copy} Bericht als Text</button>
     </div>
   </section>
+  ${(() => { const cs = customerStats(mk); return cs.length ? `<section class="card"><h2>Kunden im ${MONTHS[+mk.slice(5) - 1]}</h2><dl class="kv">${cs.map(e => `<dt>${esc(e.name)} <small style="color:var(--muted)">· ${e.n} Einsatz${e.n === 1 ? "" : "e"}</small></dt><dd>${hm(e.min)} h</dd>`).join("")}</dl></section>` : ""; })()}
   <section class="days" aria-label="Tage">${rows}</section>`;
 }
 function lastDayOf(mk) { const l = `${mk}-${pad(daysInMonth(mk))}`; const t = todayDs(); return l < t ? l : t; }
@@ -876,6 +907,7 @@ function openEditor(ds) {
   const hol = holidayName(ds);
   draft = { ds, rec: rec ? clone(rec) : { kind: hol ? "feiertag" : "arbeit" } };
   if (!draft.rec.abs) draft.rec.abs = [];
+  if (!draft.rec.kunden) draft.rec.kunden = [];
   renderEditor();
 }
 function renderEditor(err) {
@@ -887,8 +919,13 @@ function renderEditor(err) {
       <div class="field"><label for="e-af${i}">Von</label><input type="time" id="e-af${i}" data-abs="${i}" data-f="from" value="${esc(a.from || "")}"></div>
       <div class="field"><label for="e-ab${i}">Bis</label><input type="time" id="e-ab${i}" data-abs="${i}" data-f="to" value="${esc(a.to || "")}"></div>
       <button type="button" class="icon-btn" data-act="absdel" data-i="${i}" aria-label="Entfernen">${ICON.x}</button></div>`).join("");
+  const kdRows = rec.kunden.map((k, i) => `<div class="kd-row">
+      <div class="field kd-name"><label for="e-kn${i}">Kunde</label><input id="e-kn${i}" list="kd-list" autocomplete="off" data-kd="${i}" data-f="name" value="${esc(k.name || "")}"></div>
+      <div class="field"><label for="e-kf${i}">Von</label><input type="time" id="e-kf${i}" data-kd="${i}" data-f="from" value="${esc(k.from || "")}"></div>
+      <div class="field"><label for="e-kb${i}">Bis</label><input type="time" id="e-kb${i}" data-kd="${i}" data-f="to" value="${esc(k.to || "")}"></div>
+      <button type="button" class="icon-btn" data-act="kdrowdel" data-i="${i}" aria-label="Entfernen">${ICON.x}</button></div>`).join("");
   const c = calc(ds, rec);
-  openSheet(`
+  openSheet(`${kdDatalist()}
     <h3>${WD_LONG[d.getDay()]}, ${d.getDate()}. ${(S.settings.region === "DE" ? MONTHS_DE : MONTHS)[d.getMonth()]} ${d.getFullYear()}</h3>
     <p class="sub">${hol ? esc(hol) + " · " : ""}Soll ${hm(c.soll)} · Ist ${hm(c.ist)} · Saldo ${hmSigned(c.saldo)}</p>
     <form class="form" id="edit-form">
@@ -900,6 +937,9 @@ function renderEditor(err) {
       <div class="grid4">
         ${["in", "ls", "le", "out"].map(k => `<div class="field"><label for="e-${k}">${STAMP_LABELS[k]}</label><input type="time" id="e-${k}" data-f="${k}" value="${esc(rec[k] || "")}"></div>`).join("")}
       </div>
+      <div class="lbl">Kunden (von – bis)</div>
+      ${kdRows || '<p class="hint">Keine.</p>'}
+      <button type="button" class="btn" data-act="kdrowadd">+ Kunde hinzufügen</button>
       <div class="lbl">Stundenweise Abwesenheit (Arzt, Behörde …)</div>
       ${abs || '<p class="hint">Keine.</p>'}
       <button type="button" class="btn" data-act="absadd">+ Arztbesuch / Abwesenheit hinzufügen</button>
@@ -922,6 +962,7 @@ function readDraftInputs() {
   for (const el of root.querySelectorAll("[data-f]")) {
     const f = el.dataset.f, val = el.type === "checkbox" ? el.checked : el.value;
     if (el.dataset.abs != null) draft.rec.abs[+el.dataset.abs][f] = val;
+    else if (el.dataset.kd != null) draft.rec.kunden[+el.dataset.kd][f] = val;
     else draft.rec[f] = val;
   }
 }
@@ -932,6 +973,10 @@ function validateRec(r) {
   if (r.ls && t("ls") < t("in")) return "Mittag Anfang liegt vor dem Arbeitsbeginn.";
   if (r.le && t("le") < t("ls")) return "Mittag Ende liegt vor dem Mittag Anfang.";
   if (r.out && r.le && t("out") < t("le") && t("out") > t("in")) return "Arbeitsende liegt vor dem Mittag Ende.";
+  for (const k of r.kunden || []) {
+    if (!k.name || !k.from) return "Bitte bei jedem Kunden Name und Von eintragen.";
+    if (k.to && k.to === k.from) return `Bei ${k.name} sind Von und Bis gleich.`;
+  }
   for (const a of r.abs || []) if (!a.from || !a.to || toMin(a.to) <= toMin(a.from)) return "Bitte bei jeder Abwesenheit Von und Bis eintragen (Bis nach Von).";
   return null;
 }
@@ -939,6 +984,11 @@ function cleanRec(r) {
   const out = {};
   for (const [k, v] of Object.entries(r)) {
     if (k === "abs") { if (v.length) out.abs = v.map(a => ({ type: a.type, from: a.from, to: a.to })); continue; }
+    if (k === "kunden") {
+      const ks = v.map(x => { const o = { name: String(x.name || "").trim(), from: x.from || "" }; if (x.to) o.to = x.to; if (x.note) o.note = x.note; return o; })
+        .filter(x => x.name || x.from || x.to).sort((a, b) => (a.from || "").localeCompare(b.from || ""));
+      if (ks.length) out.kunden = ks; continue;
+    }
     if (v === "" || v === false || v == null) continue;
     out[k] = k === "km" ? Number(v) : v;
   }
@@ -948,6 +998,23 @@ function cleanRec(r) {
 function isEmptyRec(r, ds) {
   const keys = Object.keys(r).filter(k => !(k === "kind" && (r.kind === "arbeit" || (r.kind === "feiertag" && holidayName(ds)))));
   return keys.length === 0;
+}
+
+function openKunde(ds, mode) {
+  const top = knownCustomers().slice(0, 6);
+  openSheet(`${kdDatalist()}
+    <h3>${mode === "start" ? "Beim Kunden angekommen" : "Kundeneinsatz nachtragen"}</h3>
+    <p class="sub">${mode === "start" ? "Die Zeit läuft ab jetzt, bis du bei diesem Kunden auf „Fertig“ tippst." : "Kunde mit Von- und Bis-Zeit eintragen."}</p>
+    <form class="form" id="kd-form" data-mode="${mode}">
+      <div class="field"><label for="k-name">Kunde</label><input id="k-name" list="kd-list" autocomplete="off" placeholder="z. B. Familie Huber, Baustelle Linz" required></div>
+      ${top.length ? `<div class="btn-row">${top.map(n => `<button type="button" class="chip" style="border:0;padding:8px 12px;font-size:13px" data-act="kdpick" data-name="${esc(n)}">${esc(n)}</button>`).join("")}</div>` : ""}
+      ${mode === "start" ? `<div class="field"><label for="k-from">Ankunft</label><input type="time" id="k-from" value="${nowHM()}"></div><input type="hidden" id="k-date" value="${ds}">`
+        : `<div class="field"><label for="k-date">Datum</label><input type="date" id="k-date" value="${ds}"></div>
+      <div class="grid2"><div class="field"><label for="k-from">Von</label><input type="time" id="k-from"></div><div class="field"><label for="k-to">Bis</label><input type="time" id="k-to"></div></div>`}
+      <div class="field"><label for="k-note">Notiz (optional)</label><input id="k-note" placeholder="z. B. Heizung getauscht"></div>
+      <div id="k-err" class="err" hidden></div>
+      <div class="sheet-actions"><button class="btn primary grow" type="submit">${mode === "start" ? "Starten" : "Eintragen"}</button><button class="btn grow" type="button" data-act="closesheet-btn">Abbrechen</button></div>
+    </form>`);
 }
 
 function openPartial(ds) {
@@ -978,14 +1045,15 @@ function buildCsv(mk) {
   L(["Name", s.name]); L(["Personalnummer", s.persnr]); L(["Firma / Abteilung", s.firma]);
   L(["Erstellt am", new Date().toLocaleString("de-AT")]);
   L([]);
-  L(["Datum", "Wochentag", "Art", "Feiertag", "Arbeitsort", "Arbeitsbeginn", "Mittag Anfang", "Mittag Ende", "Arbeitsende", "Pause (h)", "Arbeitszeit (h)", "Stundenweise Abwesenheit", "Abwesenheit bezahlt (h)", "Ist (h)", "Soll (h)", "Saldo (h)", "Beleg", "Kilometer", "Projekt / Kostenstelle", "Notiz"]);
+  L(["Datum", "Wochentag", "Art", "Feiertag", "Arbeitsort", "Arbeitsbeginn", "Mittag Anfang", "Mittag Ende", "Arbeitsende", "Pause (h)", "Arbeitszeit (h)", "Stundenweise Abwesenheit", "Abwesenheit bezahlt (h)", "Ist (h)", "Soll (h)", "Saldo (h)", "Beleg", "Kilometer", "Projekt / Kostenstelle", "Kunden", "Kunden (h)", "Notiz"]);
   for (const ds of monthDays(mk)) {
     const c = calc(ds), r = c.rec, d = parseDs(ds);
     const absTxt = (r.abs || []).map(a => `${(PARTIAL[a.type] || {}).label || a.type} ${a.from}-${a.to}`).join(", ");
     const cnt = c.counted;
     L([`${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`, WD_LONG[d.getDay()], c.kind === "arbeit" ? (c.soll || r.in ? "Arbeitstag" : "") : c.K.label, c.hol || "", r.ort ? ORTE[r.ort] : (r.in ? ORTE.betrieb : ""),
       r.in || "", r.ls || "", r.le || "", r.out || "", c.brk ? dec(c.brk) : "", c.worked ? dec(c.worked) : "", absTxt, c.paidAbs ? dec(c.paidAbs) : "",
-      cnt ? dec(c.ist) : "", dec(c.soll), cnt ? dec(c.saldo) : "", r.beleg ? "ja" : "", r.km ? String(r.km).replace(".", ",") : "", r.projekt || "", r.note || ""]);
+      cnt ? dec(c.ist) : "", dec(c.soll), cnt ? dec(c.saldo) : "", r.beleg ? "ja" : "", r.km ? String(r.km).replace(".", ",") : "", r.projekt || "",
+      (r.kunden || []).map(k => `${k.name} ${k.from}-${k.to || ""}`).join(", "), (r.kunden || []).length ? dec((r.kunden || []).reduce((a, k) => a + kdMin(k, ds), 0)) : "", r.note || ""]);
   }
   L([]);
   L(["Zusammenfassung"]);
@@ -995,6 +1063,14 @@ function buildCsv(mk) {
   L(["Pflegefreistellung (Tage)", t.pflege]); L(["Sonderurlaub (Tage)", t.sonder]); L(["Schulung / Berufsschule (Tage)", t.schule]);
   L(["Zeitausgleich (Tage)", t.za]); L(["Unbezahlter Urlaub (Tage)", t.unbezahlt]);
   L(["Arztbesuche (Anzahl)", t.arztN]); L(["Arztbesuche (h)", dec(t.arzt)]); L(["Kilometer gesamt", String(t.km).replace(".", ",")]);
+  const cs = customerStats(mk);
+  if (cs.length) {
+    L([]); L(["Kundeneinsätze"]);
+    L(["Datum", "Wochentag", "Kunde", "Von", "Bis", "Dauer (h)", "Notiz"]);
+    for (const ds of monthDays(mk)) { const r = getRec(ds), d = parseDs(ds); for (const k of (r && r.kunden) || []) L([`${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`, WD_LONG[d.getDay()], k.name, k.from, k.to || "", dec(kdMin(k, ds)), k.note || ""]); }
+    L([]); L(["Summe je Kunde"]); L(["Kunde", "Einsätze", "Stunden (h)"]);
+    for (const e of cs) L([e.name, e.n, dec(e.min)]);
+  }
   L([]); L(["Unterschrift Mitarbeiter", ""]); L(["Unterschrift Arbeitgeber", ""]);
   return "﻿" + lines.join("\r\n");
 }
@@ -1010,6 +1086,8 @@ function buildReport(mk) {
   const abs = [];
   for (const ds of monthDays(mk)) { const c = calc(ds); if (c.kind !== "arbeit" && c.kind !== "feiertag" && c.soll > 0) abs.push(`${fmtShort(ds)} ${c.K.label}${c.rec.beleg ? " (Beleg)" : ""}`); for (const a of c.rec.abs || []) abs.push(`${fmtShort(ds)} ${(PARTIAL[a.type] || {}).label} ${a.from}–${a.to}`); }
   if (abs.length) lines.push("", "Abwesenheiten:", ...abs.map(x => "• " + x));
+  const cs = customerStats(mk);
+  if (cs.length) lines.push("", "Kunden:", ...cs.map(e => `• ${e.name}: ${hm(e.min)} h (${e.n} Einsatz${e.n === 1 ? "" : "e"})`));
   return lines.filter((x, i, a) => !(x === "" && a[i - 1] === "")).join("\n");
 }
 async function offerFile(filename, data) {
@@ -1067,6 +1145,18 @@ document.addEventListener("click", async e => {
     case "undo": if (lastUndo) { setRec(lastUndo.ds, lastUndo.prev); lastUndo = null; $("toast-root").innerHTML = ""; toast("Rückgängig gemacht."); render(); } break;
     case "edit": openEditor(el.dataset.ds); break;
     case "partial": openPartial(el.dataset.ds); break;
+    case "kdstart": openKunde(el.dataset.ds, "start"); break;
+    case "kdadd": openKunde(el.dataset.ds, "add"); break;
+    case "kdpick": $("k-name").value = el.dataset.name; break;
+    case "kdstop": {
+      const ds = todayDs(), r = clone(getRec(ds) || {}), k = (r.kunden || [])[+el.dataset.i];
+      if (!k) break;
+      lastUndo = { ds, prev: clone(getRec(ds)) };
+      k.to = nowHM(); if (k.to === k.from) k.to = pad(Math.floor(((toMin(k.from) + 1) % 1440) / 60)) + ":" + pad((toMin(k.from) + 1) % 60);
+      setRec(ds, r); toast(`${k.name}: ${hm(kdDur(k))} h eingetragen`, true); render(); break;
+    }
+    case "kdrowadd": readDraftInputs(); draft.rec.kunden.push({ name: "", from: "", to: "" }); renderEditor(); break;
+    case "kdrowdel": readDraftInputs(); draft.rec.kunden.splice(+el.dataset.i, 1); renderEditor(); break;
     case "closesheet-btn": closeSheet(); break;
     case "absadd": readDraftInputs(); draft.rec.abs.push({ type: "arzt", from: "", to: "" }); renderEditor(); break;
     case "absdel": readDraftInputs(); draft.rec.abs.splice(+el.dataset.i, 1); renderEditor(); break;
@@ -1120,6 +1210,18 @@ document.addEventListener("submit", e => {
     const ds = draft.ds;
     setRec(ds, isEmptyRec(r, ds) ? null : r);
     closeSheet(); toast("Gespeichert."); render();
+  } else if (f.id === "kd-form") {
+    const mode = f.dataset.mode, ds = $("k-date").value, name = $("k-name").value.trim(), from = $("k-from").value, to = mode === "add" ? $("k-to").value : "", errEl = $("k-err");
+    const fail = m => { errEl.textContent = m; errEl.hidden = false; };
+    if (!name) return fail("Bitte den Namen des Kunden eintragen.");
+    if (!ds || !from) return fail("Bitte Datum und Von-Zeit eintragen.");
+    if (mode === "add" && (!to || to === from)) return fail("Bitte eine Bis-Zeit eintragen, die sich von der Von-Zeit unterscheidet.");
+    const r = clone(getRec(ds) || { kind: holidayName(ds) ? "feiertag" : "arbeit" });
+    const k = { name, from }; if (to) k.to = to; const note = $("k-note").value.trim(); if (note) k.note = note;
+    r.kunden = (r.kunden || []).concat(k).sort((a, b) => a.from.localeCompare(b.from));
+    lastUndo = { ds, prev: getRec(ds) ? clone(getRec(ds)) : null };
+    setRec(ds, r); closeSheet();
+    toast(mode === "start" ? `${name} ab ${from} gestartet` : `${name} ${from}–${to} eingetragen`, true); render();
   } else if (f.id === "partial-form") {
     const ds = $("q-date").value, from = $("q-from").value, to = $("q-to").value, errEl = $("q-err");
     if (!ds || !from || !to || toMin(to) <= toMin(from)) { errEl.textContent = "Bitte Datum, Von und Bis eintragen. Bis muss nach Von liegen."; errEl.hidden = false; return; }
