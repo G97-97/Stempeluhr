@@ -535,12 +535,18 @@ function customerStats(mk) {
 const kdDatalist = () => `<datalist id="kd-list">${knownCustomers().map(n => `<option value="${esc(n)}"></option>`).join("")}</datalist>`;
 
 const eur = v => v.toLocaleString("de-AT", { style: "currency", currency: "EUR" });
-const rateNum = () => { const v = parseFloat(String(S.settings.rate ?? "").replace(",", ".")); return isFinite(v) && v > 0 ? v : 0; };
+const EARN_BASIS = { worked: "Gearbeitet", ist: "Mit Urlaub/Krank", ueber: "Überstunden", krank: "Krankenstand" };
+const EARN_HINT = { worked: "gestempelte Arbeitszeit", ist: "Ist-Stunden inkl. Urlaub, Krankenstand, Feiertag", ueber: "Überstunden = Ist minus Soll im Monat", krank: "Stunden der Krankenstandstage" };
+const earnBasis = () => EARN_BASIS[S.settings.rateBasis] ? S.settings.rateBasis : "worked";
+// eigener Stundensatz je Auswahl (z. B. Überstunden mit Zuschlag); alter Einzelwert gilt als Vorgabe
+const rateStr = b => { const r = S.settings.rates || {}; return r[b] != null ? r[b] : (S.settings.rate || ""); };
+const rateNum = b => { const v = parseFloat(String(rateStr(b)).replace(",", ".")); return isFinite(v) && v > 0 ? v : 0; };
 function earn(t) {
-  const basis = S.settings.rateBasis === "ist" ? "ist" : "worked", min = Math.max(0, basis === "ist" ? t.ist : t.worked);
-  return { basis, min, rate: rateNum(), sum: Math.round(min / 60 * rateNum() * 100) / 100 };
+  const basis = earnBasis(), rate = rateNum(basis);
+  const min = Math.max(0, { worked: t.worked, ist: t.ist, ueber: t.saldo, krank: t.krankMin }[basis]);
+  return { basis, min, rate, sum: Math.round(min / 60 * rate * 100) / 100 };
 }
-const earnLine = e => `${dec(e.min)} h × ${eur(e.rate)} = ${eur(e.sum)}`;
+const earnLine = e => `${EARN_BASIS[e.basis]} ${dec(e.min)} h × ${eur(e.rate)} = ${eur(e.sum)}`;
 /* ---------- Berechnung ---------- */
 function sollBase(ds) {
   if (holidayName(ds)) return 0;
@@ -596,13 +602,14 @@ function calc(ds, rec) {
 
 function monthDays(mk) { const n = daysInMonth(mk), out = []; for (let i = 1; i <= n; i++) out.push(`${mk}-${pad(i)}`); return out; }
 function monthStats(mk) {
-  const t = { soll: 0, ist: 0, saldo: 0, worked: 0, brk: 0, urlaub: 0, krank: 0, pflege: 0, za: 0, arzt: 0, arztN: 0, km: 0, feiertag: 0, workdays: 0, sonder: 0, schule: 0, unbezahlt: 0, unfall: 0 };
+  const t = { soll: 0, ist: 0, saldo: 0, worked: 0, brk: 0, urlaub: 0, krank: 0, pflege: 0, za: 0, arzt: 0, arztN: 0, km: 0, feiertag: 0, workdays: 0, sonder: 0, schule: 0, unbezahlt: 0, unfall: 0, krankMin: 0 };
   for (const ds of monthDays(mk)) {
     const c = calc(ds);
     if (!c.counted) {
       // geplante Abwesenheiten zählen für den Urlaubskonto-Überblick separat
       continue;
     }
+    if (c.kind === "krank") t.krankMin += c.ist;
     t.soll += c.soll; t.ist += c.ist; t.saldo += c.saldo; t.worked += c.worked; t.brk += c.brk; t.arzt += c.arzt;
     t.arztN += (c.rec.abs || []).filter(a => a.type === "arzt").length;
     t.km += Number(c.rec.km) || 0;
@@ -803,20 +810,20 @@ function viewMonat() {
   ${(() => { const e = earn(t); return `<section class="card earn">
     <h2>Verdienst im ${MONTHS[+mk.slice(5) - 1]}</h2>
     <div class="grid2">
-      <div class="field"><label for="m-rate">Betrag pro Stunde (€)</label><input id="m-rate" inputmode="decimal" autocomplete="off" placeholder="z. B. 18,50" value="${esc(S.settings.rate ? String(S.settings.rate).replace(".", ",") : "")}"></div>
-      <div class="field"><label for="m-basis">Welche Stunden</label><select id="m-basis"><option value="worked" ${e.basis === "worked" ? "selected" : ""}>Gearbeitet</option><option value="ist" ${e.basis === "ist" ? "selected" : ""}>Mit Urlaub/Krank</option></select></div>
+      <div class="field"><label for="m-rate">Betrag pro Stunde (€)</label><input id="m-rate" inputmode="decimal" autocomplete="off" placeholder="z. B. 18,50" value="${esc(String(rateStr(e.basis)).replace(".", ","))}"></div>
+      <div class="field"><label for="m-basis">Welche Stunden</label><select id="m-basis">${Object.entries(EARN_BASIS).map(([k, l]) => `<option value="${k}" ${e.basis === k ? "selected" : ""}>${l}</option>`).join("")}</select></div>
     </div>
     <div class="earn-out" id="earn-out">${earnOut(e)}</div>
   </section>`; })()}`;
 }
 function earnOut(e) {
-  return e.rate ? `<span>${dec(e.min)} h × ${eur(e.rate)}</span><b>${eur(e.sum)}</b><small>Brutto, vor Steuern und Abgaben. Zählt Tage bis heute.</small>`
+  return e.rate ? `<span>${dec(e.min)} h × ${eur(e.rate)}</span><b>${eur(e.sum)}</b><small>${EARN_HINT[e.basis]}. Brutto, vor Steuern und Abgaben. Zählt Tage bis heute.</small>`
     : `<small>Trag einen Betrag pro Stunde ein, dann wird der Gesamtbetrag für den Monat ausgerechnet.</small>`;
 }
 document.addEventListener("input", e => {
   if (e.target.id !== "m-rate" && e.target.id !== "m-basis") return;
-  const v = $("m-rate").value.trim().replace(/[^\d,.]/g, "");
-  S.settings.rate = v.replace(",", "."); S.settings.rateBasis = $("m-basis").value;
+  if (e.target.id === "m-basis") { S.settings.rateBasis = e.target.value; $("m-rate").value = String(rateStr(e.target.value)).replace(".", ","); }
+  else S.settings.rates = { ...(S.settings.rates || {}), [earnBasis()]: e.target.value.trim().replace(/[^\d,.]/g, "").replace(",", ".") };
   $("earn-out").innerHTML = earnOut(earn(monthStats(viewMonth)));
   clearTimeout(window.__rateT); window.__rateT = setTimeout(saveSettings, 600);
 });
@@ -1108,7 +1115,7 @@ function buildCsv(mk) {
   L(["Zeitausgleich (Tage)", t.za]); L(["Unbezahlter Urlaub (Tage)", t.unbezahlt]);
   L(["Arztbesuche (Anzahl)", t.arztN]); L(["Arztbesuche (h)", dec(t.arzt)]); L(["Kilometer gesamt", String(t.km).replace(".", ",")]);
   const ea = earn(t);
-  if (ea.rate) { L([]); L(["Verdienst (brutto)"]); L(["Stunden (h)", dec(ea.min), ea.basis === "ist" ? "Ist-Stunden" : "geleistete Arbeitszeit"]); L(["Betrag pro Stunde (EUR)", dec2(ea.rate)]); L(["Gesamtbetrag (EUR)", dec2(ea.sum)]); }
+  if (ea.rate) { L([]); L(["Verdienst (brutto)"]); L(["Stunden (h)", dec(ea.min), EARN_BASIS[ea.basis]]); L(["Betrag pro Stunde (EUR)", dec2(ea.rate)]); L(["Gesamtbetrag (EUR)", dec2(ea.sum)]); }
   const cs = customerStats(mk);
   if (cs.length) {
     L([]); L(["Kundeneinsätze"]);
