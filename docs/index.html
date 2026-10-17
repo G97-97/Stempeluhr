@@ -270,6 +270,15 @@ button { cursor: pointer; }
 .earn-out span { color: var(--muted); font-size: 13.5px; }
 .earn-out b { font-size: 26px; letter-spacing: -.01em; }
 .earn-out small { color: var(--muted); font-size: 12.5px; }
+.closed-badge { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--accent); margin: -4px 0 10px; }
+.closed-badge svg { width: 16px; height: 16px; }
+.closed-card { border-color: var(--accent); }
+.ytbl { display: grid; }
+.ytr { display: grid; grid-template-columns: minmax(0,1.4fr) 0.6fr 1fr 1fr; gap: 6px; align-items: center; padding: 10px 2px; border: 0; border-bottom: 1px solid var(--line); background: none; text-align: left; font: inherit; color: inherit; width: 100%; }
+.ytr:last-child { border-bottom: 0; }
+.ytr span:not(:first-child) { text-align: right; font-family: var(--f-num); font-variant-numeric: tabular-nums; }
+.ytr .ok svg { width: 14px; height: 14px; color: var(--accent); vertical-align: -2px; }
+.yth { font-size: 12px; font-weight: 600; color: var(--muted); padding-top: 0; }
 .kd-tbl { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--surface); }
 .kd-cap { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 8px 8px 12px; background: var(--bg); border-bottom: 1px solid var(--line); }
 .kd-cap b { font-size: 14px; }
@@ -297,7 +306,7 @@ button { cursor: pointer; }
 
 /* Nav */
 .nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--surface); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
-.nav-in { max-width: 560px; margin: 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); height: var(--nav-h); }
+.nav-in { max-width: 560px; margin: 0 auto; display: grid; grid-template-columns: repeat(5, 1fr); height: var(--nav-h); }
 .nav button { border: 0; background: none; display: grid; justify-items: center; align-content: center; gap: 3px; font-size: 11.5px; font-weight: 600; color: var(--muted); }
 .nav button[aria-current="page"] { color: var(--accent); }
 
@@ -335,6 +344,7 @@ button { cursor: pointer; }
   <div class="nav-in">
     <button id="nav-heute" data-tab="heute"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg>Stempeln</button>
     <button id="nav-monat" data-tab="monat"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Monat</button>
+    <button id="nav-jahr" data-tab="jahr"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20h16M7 16v-5M12 16V6M17 16v-8"/></svg>Übersicht</button>
     <button id="nav-abw" data-tab="abw"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 21V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v16l-8-4z"/></svg>Abwesenheit</button>
     <button id="nav-profil" data-tab="profil"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>Profil</button>
   </div>
@@ -468,10 +478,38 @@ function setRec(ds, rec) {
   const mk = ds.slice(0, 7);
   if (!S.months[mk]) S.months[mk] = { days: {}, updatedAt: 0 };
   if (rec) S.months[mk].days[ds.slice(8)] = rec; else delete S.months[mk].days[ds.slice(8)];
+  refreshClosed(mk);
   S.months[mk].updatedAt = Date.now();
   saveLocal(); scheduleRemote("m-" + mk);
 }
 function saveSettings() { S.settings.updatedAt = Date.now(); saveLocal(); scheduleRemote("settings"); }
+
+/* ---------- Monatsabschluss ---------- */
+// Am Monatsersten wird der Vormonat abgeschlossen: die Ergebnisse werden als fester Stand im Monat gespeichert.
+// Die Tageseinträge bleiben erhalten; wird danach noch etwas geändert, wird der Stand aktualisiert und markiert.
+function monthSnapshot(mk) {
+  const t = monthStats(mk), e = earn(t);
+  return { soll: t.soll, ist: t.ist, saldo: t.saldo, worked: t.worked, workdays: t.workdays, urlaub: t.urlaub, krank: t.krank, arzt: t.arzt, km: t.km,
+    konto: totalSaldo(lastDayOf(mk)), kunden: customerStats(mk), verdienst: e.rate ? { basis: e.basis, rate: e.rate, sum: e.sum } : null };
+}
+function closeMonths() {
+  const cur = todayDs().slice(0, 7); let last = null;
+  for (const mk of allMonthKeys()) {
+    if (mk >= cur) continue;
+    const m = S.months[mk];
+    if (m && m.closed) continue;
+    if (!m || !Object.keys(m.days || {}).length) { if (mk >= S.settings.startDate.slice(0, 7) && monthStats(mk).soll === 0) continue; }
+    if (!S.months[mk]) S.months[mk] = { days: {}, updatedAt: 0 };
+    S.months[mk].closed = { at: Date.now(), ...monthSnapshot(mk) };
+    S.months[mk].updatedAt = Date.now(); scheduleRemote("m-" + mk); last = mk;
+  }
+  if (last) { S.settings.closedNotice = last; saveSettings(); }
+  saveLocal();
+}
+function refreshClosed(mk) {
+  const m = S.months[mk];
+  if (m && m.closed) m.closed = { ...m.closed, ...monthSnapshot(mk), changedAt: Date.now() };
+}
 
 function setSync(mode) {
   syncMode = mode;
@@ -511,6 +549,7 @@ async function connect() {
         if ((S.settings.updatedAt || 0) > (remote.has("settings") ? remote.get("settings") : -1)) scheduleRemote("settings");
       }
       setSync("cloud");
+      if (!closedOnce) { closedOnce = true; closeMonths(); changed = true; }
       if (changed) { saveLocal(); render(); }
     }, () => { dbCol = null; setSync("local"); });
   } catch (e) { setSync("local"); }
@@ -655,6 +694,7 @@ function vacation(year) {
 let tab = "heute";
 try { const t = sessionStorage.getItem("stempeluhr.tab"); if (t) tab = t; } catch (e) {}
 let viewMonth = todayDs().slice(0, 7);
+let viewYear = +todayDs().slice(0, 4);
 let lastUndo = null;
 
 function render() {
@@ -662,7 +702,7 @@ function render() {
   const s = S.settings;
   $("who").textContent = s.name ? s.name + (s.firma ? " · " + s.firma : "") : "Arbeitszeiterfassung";
   const v = $("view");
-  v.innerHTML = tab === "heute" ? viewHeute() : tab === "monat" ? viewMonat() : tab === "abw" ? viewAbw() : viewProfil();
+  v.innerHTML = tab === "heute" ? viewHeute() : tab === "monat" ? viewMonat() : tab === "abw" ? viewAbw() : tab === "jahr" ? viewJahr() : viewProfil();
 }
 
 const ICON = {
@@ -728,6 +768,11 @@ function viewHeute() {
     ${absToday ? `<div class="btn-row">${absToday}</div>` : ""}
   </section>
   ${warn}
+  ${(() => { const mk = S.settings.closedNotice, m = mk && S.months[mk]; if (!m || !m.closed) return ""; const c = m.closed;
+    return `<section class="card closed-card"><h2>${monthName(mk, S.settings.region)} abgeschlossen</h2>
+      <p class="hint" style="margin:0 0 10px">Die Ergebnisse sind gespeichert. Der neue Monat beginnt am 1. wieder bei null.</p>
+      <dl class="kv"><dt>Arbeitszeit</dt><dd>${hm(c.worked)} h</dd><dt>Saldo Monat</dt><dd class="${c.saldo >= 0 ? "pos" : "neg"}">${hmSigned(c.saldo)}</dd>${c.verdienst ? `<dt>Verdienst (brutto)</dt><dd>${eur(c.verdienst.sum)}</dd>` : ""}</dl>
+      <div class="btn-row" style="margin-top:12px"><button class="btn primary grow" data-act="closedcsv">${ICON.dl} CSV sichern</button><button class="btn grow" data-act="closedok">OK</button></div></section>`; })()}
   ${kundenCard}
   <section class="tiles">
     <div class="tile"><span>Arbeitszeit heute</span><b>${hm(c.worked + c.paidAbs - c.unpaid)}</b><small>Soll ${hm(c.soll)}</small></div>
@@ -778,6 +823,7 @@ function viewMonat() {
     <h2>${monthName(mk, S.settings.region)}</h2>
     <button class="icon-btn" data-act="mnext" aria-label="Nächster Monat">${ICON.right}</button>
   </div>
+  ${S.months[mk] && S.months[mk].closed ? `<div class="closed-badge">${ICON.check} Abgeschlossen am ${fmtDate(S.months[mk].closed.at)}${S.months[mk].closed.changedAt ? ` · danach geändert am ${fmtDate(S.months[mk].closed.changedAt)}` : ""}</div>` : ""}
   <section class="tiles">
     <div class="tile"><span>Ist-Stunden</span><b>${hm(t.ist)}</b><small>Soll ${hm(t.soll)}</small></div>
     <div class="tile"><span>Saldo Monat</span><b class="${t.saldo >= 0 ? "pos" : "neg"}">${hmSigned(t.saldo)}</b><small>bis heute</small></div>
@@ -805,7 +851,7 @@ function viewMonat() {
       <button class="btn grow" data-act="report">${ICON.copy} Bericht als Text</button>
     </div>
   </section>
-  ${(() => { const cs = customerStats(mk); return cs.length ? `<section class="card"><h2>Kunden im ${MONTHS[+mk.slice(5) - 1]}</h2><dl class="kv">${cs.map(e => `<dt>${esc(e.name)} <small style="color:var(--muted)">· ${e.n} Einsatz${e.n === 1 ? "" : "e"}</small></dt><dd>${hm(e.min)} h</dd>`).join("")}</dl></section>` : ""; })()}
+  ${(() => { const cs = customerStats(mk); return cs.length ? `<section class="card"><h2>Kunden im ${MONTHS[+mk.slice(5) - 1]}</h2><dl class="kv">${cs.map(e => `<dt>${esc(e.name)} <small style="color:var(--muted)">· ${e.n} ${e.n === 1 ? "Einsatz" : "Einsätze"}</small></dt><dd>${hm(e.min)} h</dd>`).join("")}</dl></section>` : ""; })()}
   <section class="days" aria-label="Tage">${rows}</section>
   ${(() => { const e = earn(t); return `<section class="card earn">
     <h2>Verdienst im ${MONTHS[+mk.slice(5) - 1]}</h2>
@@ -829,6 +875,86 @@ document.addEventListener("input", e => {
 });
 function lastDayOf(mk) { const l = `${mk}-${pad(daysInMonth(mk))}`; const t = todayDs(); return l < t ? l : t; }
 
+/* ---------- Ansicht: Übersicht über alle Monate ---------- */
+function yearStats(year) {
+  const today = todayDs(), months = [], orte = {}, kunden = {};
+  const y = { worked: 0, ist: 0, soll: 0, saldo: 0, workdays: 0, urlaub: 0, krank: 0, arzt: 0, km: 0, verdienst: 0, kdMin: 0 };
+  for (let m = 1; m <= 12; m++) {
+    const mk = `${year}-${pad(m)}`;
+    if (mk > today.slice(0, 7) || `${mk}-31` < S.settings.startDate && !S.months[mk]) continue;
+    const t = monthStats(mk), e = earn(t), cs = customerStats(mk), kdSum = cs.reduce((a, x) => a + x.min, 0);
+    if (!t.soll && !t.ist && !cs.length) continue;
+    months.push({ mk, t, e, kdMin: kdSum, closed: S.months[mk] && S.months[mk].closed });
+    for (const k of ["worked", "ist", "soll", "saldo", "workdays", "urlaub", "krank", "arzt", "km"]) y[k] += t[k];
+    y.verdienst += e.sum; y.kdMin += kdSum;
+    for (const ds of monthDays(mk)) {
+      const c = calc(ds); if (!c.counted || !c.worked) continue;
+      const o = ORTE[c.rec.ort || "betrieb"] || c.rec.ort; (orte[o] = orte[o] || { tage: 0, min: 0 }); orte[o].tage++; orte[o].min += c.worked;
+      for (const k of c.rec.kunden || []) { const kk = kunden[k.name] || (kunden[k.name] = { name: k.name, n: 0, min: 0, first: ds, last: ds }); kk.n++; kk.min += kdMin(k, ds); if (ds < kk.first) kk.first = ds; if (ds > kk.last) kk.last = ds; }
+    }
+  }
+  return { y, months, orte: Object.entries(orte).sort((a, b) => b[1].min - a[1].min), kunden: Object.values(kunden).sort((a, b) => b.min - a.min) };
+}
+function viewJahr() {
+  const Y = yearStats(viewYear), y = Y.y, hasRate = Y.months.some(m => m.e.rate);
+  const first = +S.settings.startDate.slice(0, 4), cur = +todayDs().slice(0, 4);
+  return `
+  <div class="month-nav">
+    <button class="icon-btn" data-act="yprev" aria-label="Vorheriges Jahr" ${viewYear <= Math.min(first, ...Object.keys(S.months).map(k => +k.slice(0, 4))) ? "disabled" : ""}>${ICON.left}</button>
+    <h2>Übersicht ${viewYear}</h2>
+    <button class="icon-btn" data-act="ynext" aria-label="Nächstes Jahr" ${viewYear >= cur ? "disabled" : ""}>${ICON.right}</button>
+  </div>
+  <section class="tiles">
+    <div class="tile"><span>Gearbeitet ${viewYear}</span><b>${hm(y.worked)}</b><small>${y.workdays} Arbeitstage</small></div>
+    <div class="tile"><span>Saldo ${viewYear}</span><b class="${y.saldo >= 0 ? "pos" : "neg"}">${hmSigned(y.saldo)}</b><small>Ist ${hm(y.ist)} · Soll ${hm(y.soll)}</small></div>
+  </section>
+  ${Y.months.length ? `<section class="card">
+    <h2>Monate</h2>
+    <div class="ytbl">
+      <div class="ytr yth"><span>Monat</span><span>Tage</span><span>Arbeit</span><span>Saldo</span></div>
+      ${Y.months.slice().reverse().map(m => `<button class="ytr" data-act="gomonth" data-mk="${m.mk}"><span>${MONTHS[+m.mk.slice(5) - 1]}${m.closed ? ` <i class="ok" title="abgeschlossen">${ICON.check}</i>` : ""}</span><span>${m.t.workdays}</span><span>${hm(m.t.worked)}</span><span class="${m.t.saldo >= 0 ? "pos" : "neg"}">${hmSigned(m.t.saldo)}</span></button>`).join("")}
+    </div>
+    <p class="hint" style="margin:8px 0 0">Tippe auf einen Monat, um die einzelnen Tage zu sehen. ✓ = abgeschlossen.</p>
+  </section>` : `<section class="card"><p class="hint" style="margin:0">Für ${viewYear} gibt es noch keine Einträge.</p></section>`}
+  ${Y.kunden.length ? `<section class="card">
+    <h2>Kunden ${viewYear}</h2>
+    <div class="list">${Y.kunden.map(k => `<div class="li"><div><b>${esc(k.name)}</b><small>${k.n} ${k.n === 1 ? "Einsatz" : "Einsätze"} · ${k.first === k.last ? fmtShort(k.first) : `${fmtShort(k.first)} bis ${fmtShort(k.last)}`}</small></div><b class="num">${hm(k.min)} h</b></div>`).join("")}</div>
+  </section>` : ""}
+  ${Y.orte.length ? `<section class="card">
+    <h2>Wo gearbeitet</h2>
+    <dl class="kv">${Y.orte.map(([o, v]) => `<dt>${esc(o)} <small style="color:var(--muted)">· ${v.tage} Tag${v.tage === 1 ? "" : "e"}</small></dt><dd>${hm(v.min)} h</dd>`).join("")}</dl>
+  </section>` : ""}
+  <section class="card">
+    <h2>Abwesenheiten und mehr</h2>
+    <dl class="kv">
+      <dt>Urlaub</dt><dd>${String(y.urlaub).replace(".", ",")} Tage</dd>
+      <dt>Krankenstand</dt><dd>${y.krank} Tage</dd>
+      <dt>Arztbesuche</dt><dd>${hm(y.arzt)} h</dd>
+      <dt>Kilometer</dt><dd>${y.km.toLocaleString("de-AT")} km</dd>
+      ${hasRate ? `<div class="sep"></div><dt>Verdienst (brutto)</dt><dd>${eur(Math.round(y.verdienst * 100) / 100)}</dd>` : ""}
+    </dl>
+    <button class="btn primary" style="width:100%;margin-top:14px" data-act="ycsv">${ICON.dl} CSV für ${viewYear}</button>
+  </section>`;
+}
+function buildYearCsv(year) {
+  const s = S.settings, Y = yearStats(year), lines = [];
+  const L = arr => lines.push(arr.map(csvCell).join(";"));
+  L(["Jahresübersicht", year]); L(["Name", s.name]); L(["Personalnummer", s.persnr]); L(["Firma / Abteilung", s.firma]); L(["Erstellt am", new Date().toLocaleString("de-AT")]);
+  L([]); L(["Monate"]); L(["Monat", "Arbeitstage", "Arbeitszeit (h)", "Ist (h)", "Soll (h)", "Saldo (h)", "Urlaub (Tage)", "Krankenstand (Tage)", "Kunden (h)", "Kilometer", "Verdienst brutto (EUR)", "Abgeschlossen"]);
+  for (const m of Y.months) L([monthName(m.mk, s.region), m.t.workdays, dec(m.t.worked), dec(m.t.ist), dec(m.t.soll), dec(m.t.saldo), String(m.t.urlaub).replace(".", ","), m.t.krank, dec(m.kdMin), String(m.t.km).replace(".", ","), m.e.rate ? dec2(m.e.sum) : "", m.closed ? fmtDate(m.closed.at) : ""]);
+  L(["Summe", Y.y.workdays, dec(Y.y.worked), dec(Y.y.ist), dec(Y.y.soll), dec(Y.y.saldo), String(Y.y.urlaub).replace(".", ","), Y.y.krank, dec(Y.y.kdMin), String(Y.y.km).replace(".", ","), Y.months.some(m => m.e.rate) ? dec2(Y.y.verdienst) : "", ""]);
+  if (Y.orte.length) { L([]); L(["Arbeitsorte"]); L(["Ort", "Tage", "Stunden (h)"]); for (const [o, v] of Y.orte) L([o, v.tage, dec(v.min)]); }
+  if (Y.kunden.length) { L([]); L(["Kunden"]); L(["Kunde", "Einsätze", "Stunden (h)", "Erster Einsatz", "Letzter Einsatz"]); for (const k of Y.kunden) L([k.name, k.n, dec(k.min), fmtShort(k.first), fmtShort(k.last)]); }
+  L([]); L(["Alle Arbeitstage"]); L(["Datum", "Wochentag", "Art", "Arbeitsort", "Beginn", "Ende", "Arbeitszeit (h)", "Kunden", "Projekt / Kostenstelle", "Notiz"]);
+  for (const m of Y.months) for (const ds of monthDays(m.mk)) {
+    const c = calc(ds), r = c.rec, d = parseDs(ds);
+    if (!getRec(ds)) continue;
+    L([`${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`, WD_LONG[d.getDay()], c.kind === "arbeit" ? "Arbeitstag" : c.K.label, r.in ? (ORTE[r.ort || "betrieb"] || r.ort) : "", r.in || "", r.out || "", c.worked ? dec(c.worked) : "",
+      (r.kunden || []).map(k => `${k.name} ${k.from}-${k.to || ""}`).join(", "), r.projekt || "", r.note || ""]);
+  }
+  return "\ufeff" + lines.join("\r\n");
+}
+
 /* ---------- Ansicht: Abwesenheit ---------- */
 function absenceGroups(year) {
   const items = [];
@@ -849,6 +975,7 @@ function absenceGroups(year) {
 }
 function dayGapFree(a, b) { let x = addDays(a, 1); while (x < b) { if (sollBase(x) > 0) return false; x = addDays(x, 1); } return true; }
 const fmtShort = ds => { const d = parseDs(ds); return `${WD[d.getDay()]} ${d.getDate()}.${d.getMonth() + 1}.`; };
+const fmtDate = ts => { const d = new Date(ts); return `${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`; };
 
 function viewAbw() {
   const year = todayDs().slice(0, 4), v = vacation(year), groups = absenceGroups(year), today = todayDs();
@@ -1142,7 +1269,7 @@ function buildReport(mk) {
   for (const ds of monthDays(mk)) { const c = calc(ds); if (c.kind !== "arbeit" && c.kind !== "feiertag" && c.soll > 0) abs.push(`${fmtShort(ds)} ${c.K.label}${c.rec.beleg ? " (Beleg)" : ""}`); for (const a of c.rec.abs || []) abs.push(`${fmtShort(ds)} ${(PARTIAL[a.type] || {}).label} ${a.from}–${a.to}`); }
   if (abs.length) lines.push("", "Abwesenheiten:", ...abs.map(x => "• " + x));
   const cs = customerStats(mk);
-  if (cs.length) lines.push("", "Kunden:", ...cs.map(e => `• ${e.name}: ${hm(e.min)} h (${e.n} Einsatz${e.n === 1 ? "" : "e"})`));
+  if (cs.length) lines.push("", "Kunden:", ...cs.map(e => `• ${e.name}: ${hm(e.min)} h (${e.n} ${e.n === 1 ? "Einsatz" : "Einsätze"})`));
   return lines.filter((x, i, a) => !(x === "" && a[i - 1] === "")).join("\n");
 }
 async function offerFile(filename, data) {
@@ -1203,6 +1330,11 @@ document.addEventListener("click", async e => {
     case "kdstart": openKunde(el.dataset.ds, "start"); break;
     case "kdadd": openKunde(el.dataset.ds, "add"); break;
     case "kdpick": $("k-name").value = el.dataset.name; break;
+    case "closedok": S.settings.closedNotice = null; saveSettings(); render(); break;
+    case "closedcsv": { const mk = S.settings.closedNotice; if (!mk) break; const n = (S.settings.name || "").replace(/[^\wÄÖÜäöüß -]/g, "").trim().replace(/\s+/g, "_"); await offerFile(`Arbeitszeit_${n ? n + "_" : ""}${mk}.csv`, buildCsv(mk)); break; }
+    case "yprev": case "ynext": viewYear += act === "ynext" ? 1 : -1; render(); break;
+    case "gomonth": viewMonth = el.dataset.mk; tab = "monat"; render(); window.scrollTo(0, 0); break;
+    case "ycsv": { const n = (S.settings.name || "").replace(/[^\wÄÖÜäöüß -]/g, "").trim().replace(/\s+/g, "_"); await offerFile(`Uebersicht_${n ? n + "_" : ""}${viewYear}.csv`, buildYearCsv(viewYear)); break; }
     case "kdstop": {
       const ds = todayDs(), r = clone(getRec(ds) || {}), k = (r.kunden || [])[+el.dataset.i];
       if (!k) break;
@@ -1359,7 +1491,7 @@ setInterval(() => {
   if (c) c.innerHTML = `${pad(d.getHours())}:${pad(d.getMinutes())}<span class="sec">${pad(d.getSeconds())}</span>`;
   if (d.getMinutes() !== lastMinute) {
     lastMinute = d.getMinutes();
-    if (todayDs() !== lastDay) { lastDay = todayDs(); viewMonth = lastDay.slice(0, 7); }
+    if (todayDs() !== lastDay) { lastDay = todayDs(); viewMonth = lastDay.slice(0, 7); viewYear = +lastDay.slice(0, 4); closeMonths(); }
     if (!$("sheet-root").innerHTML && (tab === "heute" || tab === "monat") && !["m-rate", "m-basis"].includes((document.activeElement || {}).id)) render();
   }
 }, 1000);
@@ -1367,6 +1499,9 @@ setInterval(() => {
 if (!S.settings.startDate) S.settings.startDate = todayDs();
 saveLocal();
 setSync("pending");
+// In der Cloud-Version erst nach dem Abgleich abschließen, damit kein älterer Stand neuere Daten überschreibt
+let closedOnce = false;
+if (window.AndroidBridge || window.STEMPELUHR_OFFLINE || !(window.claude && window.claude.use)) { closedOnce = true; closeMonths(); }
 render();
 connect();
 })();
