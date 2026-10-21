@@ -279,6 +279,10 @@ button { cursor: pointer; }
 .ytr span:not(:first-child) { text-align: right; font-family: var(--f-num); font-variant-numeric: tabular-nums; }
 .ytr .ok svg { width: 14px; height: 14px; color: var(--accent); vertical-align: -2px; }
 .yth { font-size: 12px; font-weight: 600; color: var(--muted); padding-top: 0; }
+.kp-row { display: flex; gap: 8px; margin-top: 10px; }
+.kp-btn { background: var(--break-soft); border-color: var(--break); }
+.kp-erow { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) 44px; gap: 8px; align-items: end; }
+.kp-erow .icon-btn { width: 44px; height: 46px; }
 .kd-tbl { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--surface); }
 .kd-cap { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 8px 8px 12px; background: var(--bg); border-bottom: 1px solid var(--line); }
 .kd-cap b { font-size: 14px; }
@@ -440,7 +444,7 @@ const LS_KEY = "stempeluhr.v1";
 const defaultSettings = () => ({
   name: "", persnr: "", firma: "", region: "AT",
   soll: [480, 480, 480, 480, 390, 0, 0], // Mo..So in Minuten
-  urlaubTage: 25, urlaubRest: 0, startSaldo: 0, startDate: todayDs(), pauseHinweis: true, updatedAt: 0,
+  urlaubTage: 25, urlaubRest: 0, startSaldo: 0, startDate: todayDs(), pauseHinweis: true, kpMin: 10, kpAbzug: true, updatedAt: 0,
 });
 let S = { settings: defaultSettings(), months: {} };
 try {
@@ -586,6 +590,8 @@ function earn(t) {
   return { basis, min, rate, sum: Math.round(min / 60 * rate * 100) / 100 };
 }
 const earnLine = e => `${EARN_BASIS[e.basis]} ${dec(e.min)} h × ${eur(e.rate)} = ${eur(e.sum)}`;
+const kpDefault = () => Math.max(1, Math.min(120, Math.round(Number(S.settings.kpMin) || 10)));
+const kpSum = r => (r.kp || []).reduce((a, k) => a + (Number(k.min) || 0), 0);
 /* ---------- Berechnung ---------- */
 function sollBase(ds) {
   if (holidayName(ds)) return 0;
@@ -622,6 +628,9 @@ function calc(ds, rec) {
     if (out != null) state = "done";
   }
   let worked = iv.reduce((s, [a, b]) => s + Math.max(0, b - a), 0);
+  // Kaffeepausen: feste Minuten je Pause, werden (Einstellung) von der Arbeitszeit abgezogen
+  const kp = kpSum(r);
+  if (kp && S.settings.kpAbzug !== false) worked = Math.max(0, worked - kp);
   let paidAbs = 0, unpaid = 0, arzt = 0;
   for (const a of r.abs || []) {
     const f = toMin(a.from), t = toMin(a.to);
@@ -636,12 +645,12 @@ function calc(ds, rec) {
   if (K.credit === "half") ist += Math.round(soll / 2);
   const counted = (ds < today || (isToday && (state === "done" || (!!rec && kind !== "arbeit" && tIn == null)))) && (!!rec || ds >= S.settings.startDate);
   const missing = counted && !rec && soll > 0 && ds < today;
-  return { ds, kind, K, hol, soll, ist, worked, brk, paidAbs, unpaid, arzt, saldo: ist - soll, state, incomplete, counted, missing, rec: r };
+  return { ds, kind, K, hol, soll, ist, worked, brk, kp, paidAbs, unpaid, arzt, saldo: ist - soll, state, incomplete, counted, missing, rec: r };
 }
 
 function monthDays(mk) { const n = daysInMonth(mk), out = []; for (let i = 1; i <= n; i++) out.push(`${mk}-${pad(i)}`); return out; }
 function monthStats(mk) {
-  const t = { soll: 0, ist: 0, saldo: 0, worked: 0, brk: 0, urlaub: 0, krank: 0, pflege: 0, za: 0, arzt: 0, arztN: 0, km: 0, feiertag: 0, workdays: 0, sonder: 0, schule: 0, unbezahlt: 0, unfall: 0, krankMin: 0 };
+  const t = { soll: 0, ist: 0, saldo: 0, worked: 0, brk: 0, urlaub: 0, krank: 0, pflege: 0, za: 0, arzt: 0, arztN: 0, km: 0, feiertag: 0, workdays: 0, sonder: 0, schule: 0, unbezahlt: 0, unfall: 0, krankMin: 0, kp: 0, kpN: 0 };
   for (const ds of monthDays(mk)) {
     const c = calc(ds);
     if (!c.counted) {
@@ -649,6 +658,7 @@ function monthStats(mk) {
       continue;
     }
     if (c.kind === "krank") t.krankMin += c.ist;
+    t.kp += c.kp; t.kpN += (c.rec.kp || []).length;
     t.soll += c.soll; t.ist += c.ist; t.saldo += c.saldo; t.worked += c.worked; t.brk += c.brk; t.arzt += c.arzt;
     t.arztN += (c.rec.abs || []).filter(a => a.type === "arzt").length;
     t.km += Number(c.rec.km) || 0;
@@ -740,6 +750,8 @@ function viewHeute() {
   else if (step === "out") big = `<button class="big-btn end" data-act="stamp" data-k="out">${ICON.stop} Arbeitsende</button>`;
   else big = `<button class="big-btn done" data-act="edit" data-ds="${ds}">${ICON.check} Arbeitstag abgeschlossen · Korrigieren</button>`;
   const secondary = step === "ls" ? `<div class="btn-row"><button class="btn grow" data-act="stamp" data-k="out">Ohne Mittagspause beenden</button></div>` : "";
+  const kpBtn = c.state === "work" ? `<div class="kp-row"><button class="btn grow kp-btn" data-act="kpadd">☕ Kaffeepause ${kpDefault()} Min.</button><button class="btn" data-act="kpmore" aria-label="Andere Dauer">Dauer</button></div>` : "";
+  const kpToday = (r.kp || []).map(k => `<span class="chip k-warn">☕ ${esc(k.at || "")} · ${k.min} Min.</span>`).join(" ");
   const stamps = ["in", "ls", "le", "out"].map(k => `<button class="stamp ${r[k] ? "set" : ""} ${k === step ? "next" : ""}" data-act="edit" data-ds="${ds}" aria-label="${STAMP_LABELS[k]} ${r[k] || "nicht gestempelt"}"><span>${STAMP_SHORT[k]}</span><b>${r[k] || "––:––"}</b></button>`).join("");
 
   // Woche
@@ -763,9 +775,9 @@ function viewHeute() {
     <div class="row"><div class="clock-date">${WD_LONG[d.getDay()]}, ${d.getDate()}. ${(S.settings.region === "DE" ? MONTHS_DE : MONTHS)[d.getMonth()]} ${d.getFullYear()}</div>${kindChip}</div>
     <div class="clock" id="clock">${pad(d.getHours())}:${pad(d.getMinutes())}<span class="sec">${pad(d.getSeconds())}</span></div>
     <div class="status ${stCls}"><i></i>${statusTxt}</div>
-    ${big}${secondary}
+    ${big}${secondary}${kpBtn}
     <div class="stamps">${stamps}</div>
-    ${absToday ? `<div class="btn-row">${absToday}</div>` : ""}
+    ${absToday || kpToday ? `<div class="btn-row">${absToday} ${kpToday}</div>` : ""}
   </section>
   ${warn}
   ${(() => { const mk = S.settings.closedNotice, m = mk && S.months[mk]; if (!m || !m.closed) return ""; const c = m.closed;
@@ -776,7 +788,7 @@ function viewHeute() {
   ${kundenCard}
   <section class="tiles">
     <div class="tile"><span>Arbeitszeit heute</span><b>${hm(c.worked + c.paidAbs - c.unpaid)}</b><small>Soll ${hm(c.soll)}</small></div>
-    <div class="tile"><span>Pause heute</span><b>${hm(c.brk)}</b><small>${c.brk >= 30 || c.worked <= 360 ? "in Ordnung" : "unter 30 Min."}</small></div>
+    <div class="tile"><span>Pause heute</span><b>${hm(c.brk + c.kp)}</b><small>${c.kp ? `davon Kaffee ${c.kp} Min.` : c.brk >= 30 || c.worked <= 360 ? "in Ordnung" : "unter 30 Min."}</small></div>
     <div class="tile"><span>Diese Woche</span><b>${hm(wIst)}</b><small>von ${hm(wSoll)} Soll</small></div>
     <div class="tile"><span>Zeitkonto gesamt</span><b class="${saldo >= 0 ? "pos" : "neg"}">${hmSigned(saldo)}</b><small>${c.state === "work" || c.state === "pause" ? "ohne laufenden Tag" : "Gleitzeit-Saldo"}</small></div>
   </section>
@@ -804,6 +816,7 @@ function viewMonat() {
     if (c.kind !== "arbeit") tags.push(`<span class="chip ${c.K.cls}">${esc(c.kind === "feiertag" && c.hol ? c.hol : c.K.label)}</span>`);
     if (c.rec.ort && c.rec.ort !== "betrieb") tags.push(`<span class="chip">${esc(ORTE[c.rec.ort] || c.rec.ort)}</span>`);
     for (const k of c.rec.kunden || []) tags.push(`<span class="chip k-blue">${esc(k.name)} ${hm(kdMin(k, ds))}</span>`);
+    if (c.kp) tags.push(`<span class="chip k-warn">☕ ${(c.rec.kp || []).length}× · ${c.kp} Min.</span>`);
     for (const a of c.rec.abs || []) tags.push(`<span class="chip k-violet">${esc((PARTIAL[a.type] || {}).label || "")} ${hm(Math.max(0, toMin(a.to) - toMin(a.from)))}</span>`);
     if (c.incomplete) tags.push(`<span class="chip k-warn">Stempelung unvollständig</span>`);
     if (c.missing) tags.push(`<span class="chip k-red">Keine Zeiten</span>`);
@@ -837,6 +850,7 @@ function viewMonat() {
       <dt>Krankenstand</dt><dd>${t.krank} Tage</dd>
       ${t.unfall ? `<dt>Arbeitsunfall</dt><dd>${t.unfall} Tage</dd>` : ""}
       <dt>Arztbesuche</dt><dd>${t.arztN} · ${hm(t.arzt)} h</dd>
+      ${t.kpN ? `<dt>Kaffeepausen</dt><dd>${t.kpN} · ${hm(t.kp)} h</dd>` : ""}
       ${t.pflege ? `<dt>Pflegefreistellung</dt><dd>${t.pflege} Tage</dd>` : ""}
       <dt>Zeitausgleich</dt><dd>${t.za} Tage</dd>
       ${t.sonder ? `<dt>Sonderurlaub</dt><dd>${t.sonder} Tage</dd>` : ""}
@@ -1050,6 +1064,8 @@ function viewProfil() {
       <div class="field"><label for="p-region">Gesetzliche Feiertage</label>
         <select id="p-region"><option value="AT" ${s.region === "AT" ? "selected" : ""}>Österreich</option><option value="DE" ${s.region === "DE" ? "selected" : ""}>Deutschland (bundesweit)</option><option value="" ${!s.region ? "selected" : ""}>Keine automatisch eintragen</option></select></div>
       <label class="check"><input type="checkbox" id="p-pause" ${s.pauseHinweis ? "checked" : ""}> Hinweis bei fehlender Pause (über 6 Std.)</label>
+      <div class="field"><label for="p-kp">Kaffeepause Standard (Minuten)</label><input type="number" inputmode="numeric" min="1" max="120" id="p-kp" value="${kpDefault()}"></div>
+      <label class="check"><input type="checkbox" id="p-kpab" ${s.kpAbzug !== false ? "checked" : ""}> Kaffeepause von der Arbeitszeit abziehen</label>
       <div id="p-err" class="err" hidden></div>
       <button class="btn primary" type="submit">Speichern</button>
     </form>
@@ -1084,6 +1100,7 @@ function openEditor(ds) {
   draft = { ds, rec: rec ? clone(rec) : { kind: hol ? "feiertag" : "arbeit" } };
   if (!draft.rec.abs) draft.rec.abs = [];
   if (!draft.rec.kunden) draft.rec.kunden = [];
+  if (!draft.rec.kp) draft.rec.kp = [];
   renderEditor();
 }
 function renderEditor(err) {
@@ -1118,6 +1135,12 @@ function renderEditor(err) {
         <div class="kd-cap"><b>Kunden${rec.kunden.length ? `<small>${rec.kunden.length} · ${hm(kdTot)} h</small>` : ""}</b><button type="button" class="kd-plus" data-act="kdrowadd" aria-label="Kunde hinzufügen">+</button></div>
         ${rec.kunden.length ? `<div class="kd-tr kd-th"><span>Kunde</span><span>Von</span><span>Bis</span><span></span></div>${kdRows}` : '<div class="kd-empty">Noch keine Kunden. Mit + eine Zeile hinzufügen.</div>'}
       </div>
+      <div class="lbl">Kaffeepausen${S.settings.kpAbzug !== false ? " (werden von der Arbeitszeit abgezogen)" : " (zählen als Arbeitszeit)"}</div>
+      ${rec.kp.map((k, i) => `<div class="kp-erow">
+        <div class="field"><label for="e-kpa${i}">Uhrzeit</label><input type="time" id="e-kpa${i}" data-kp="${i}" data-f="at" value="${esc(k.at || "")}"></div>
+        <div class="field"><label for="e-kpm${i}">Minuten</label><input type="number" inputmode="numeric" min="1" max="120" id="e-kpm${i}" data-kp="${i}" data-f="min" value="${esc(k.min)}"></div>
+        <button type="button" class="icon-btn" data-act="kprowdel" data-i="${i}" aria-label="Entfernen">${ICON.x}</button></div>`).join("") || '<p class="hint">Keine.</p>'}
+      <button type="button" class="btn" data-act="kprowadd">+ Kaffeepause</button>
       <div class="lbl">Stundenweise Abwesenheit (Arzt, Behörde …)</div>
       ${abs || '<p class="hint">Keine.</p>'}
       <button type="button" class="btn" data-act="absadd">+ Arztbesuch / Abwesenheit hinzufügen</button>
@@ -1141,6 +1164,7 @@ function readDraftInputs() {
     const f = el.dataset.f, val = el.type === "checkbox" ? el.checked : el.value;
     if (el.dataset.abs != null) draft.rec.abs[+el.dataset.abs][f] = val;
     else if (el.dataset.kd != null) draft.rec.kunden[+el.dataset.kd][f] = val;
+    else if (el.dataset.kp != null) draft.rec.kp[+el.dataset.kp][f] = f === "min" ? Number(val) : val;
     else draft.rec[f] = val;
   }
 }
@@ -1155,6 +1179,7 @@ function validateRec(r) {
     if (!k.name || !k.from) return "Bitte bei jedem Kunden Name und Von eintragen.";
     if (k.to && k.to === k.from) return `Bei ${k.name} sind Von und Bis gleich.`;
   }
+  for (const k of r.kp || []) if (!(k.min >= 1 && k.min <= 120)) return "Bitte bei jeder Kaffeepause 1 bis 120 Minuten eintragen.";
   for (const a of r.abs || []) if (!a.from || !a.to || toMin(a.to) <= toMin(a.from)) return "Bitte bei jeder Abwesenheit Von und Bis eintragen (Bis nach Von).";
   return null;
 }
@@ -1162,6 +1187,7 @@ function cleanRec(r) {
   const out = {};
   for (const [k, v] of Object.entries(r)) {
     if (k === "abs") { if (v.length) out.abs = v.map(a => ({ type: a.type, from: a.from, to: a.to })); continue; }
+    if (k === "kp") { const ks = v.map(x => ({ at: x.at || "", min: Math.round(Number(x.min)) })).filter(x => x.min > 0).sort((a, b) => a.at.localeCompare(b.at)); if (ks.length) out.kp = ks; continue; }
     if (k === "kunden") {
       const ks = v.map(x => { const o = { name: String(x.name || "").trim(), from: x.from || "" }; if (x.to) o.to = x.to; if (x.note) o.note = x.note; return o; })
         .filter(x => x.name || x.from || x.to).sort((a, b) => (a.from || "").localeCompare(b.from || ""));
@@ -1195,6 +1221,23 @@ function openKunde(ds, mode) {
     </form>`);
 }
 
+function openKaffee() {
+  openSheet(`<h3>Kaffeepause</h3>
+    <p class="sub">Dauer wählen. Die Pause wird ab jetzt eingetragen.</p>
+    <form class="form" id="kp-form">
+      <div class="btn-row">${[5, 10, 15, 20, 30].map(m => `<button type="button" class="chip" style="border:0;padding:10px 14px;font-size:14px" data-act="kppick" data-min="${m}">${m} Min.</button>`).join("")}</div>
+      <div class="field"><label for="kp-min">Minuten</label><input type="number" inputmode="numeric" min="1" max="120" id="kp-min" value="${kpDefault()}"></div>
+      <label class="check"><input type="checkbox" id="kp-def"> Als Standard speichern</label>
+      <div class="sheet-actions"><button class="btn primary grow" type="submit">Eintragen</button><button class="btn grow" type="button" data-act="closesheet-btn">Abbrechen</button></div>
+    </form>`);
+}
+function addKaffee(min) {
+  const ds = todayDs(), prev = getRec(ds), r = clone(prev || { kind: holidayName(ds) ? "feiertag" : "arbeit" });
+  r.kp = (r.kp || []).concat({ at: nowHM(), min });
+  lastUndo = { ds, prev: prev ? clone(prev) : null };
+  setRec(ds, r); try { navigator.vibrate && navigator.vibrate(30); } catch (e) {}
+  toast(`Kaffeepause ${min} Min. eingetragen`, true); render();
+}
 function openPartial(ds) {
   draft = { partial: true, ds };
   const now = nowHM();
@@ -1223,13 +1266,13 @@ function buildCsv(mk) {
   L(["Name", s.name]); L(["Personalnummer", s.persnr]); L(["Firma / Abteilung", s.firma]);
   L(["Erstellt am", new Date().toLocaleString("de-AT")]);
   L([]);
-  L(["Datum", "Wochentag", "Art", "Feiertag", "Arbeitsort", "Arbeitsbeginn", "Mittag Anfang", "Mittag Ende", "Arbeitsende", "Pause (h)", "Arbeitszeit (h)", "Stundenweise Abwesenheit", "Abwesenheit bezahlt (h)", "Ist (h)", "Soll (h)", "Saldo (h)", "Beleg", "Kilometer", "Projekt / Kostenstelle", "Kunden", "Kunden (h)", "Notiz"]);
+  L(["Datum", "Wochentag", "Art", "Feiertag", "Arbeitsort", "Arbeitsbeginn", "Mittag Anfang", "Mittag Ende", "Arbeitsende", "Pause (h)", "Kaffeepause (Min.)", "Arbeitszeit (h)", "Stundenweise Abwesenheit", "Abwesenheit bezahlt (h)", "Ist (h)", "Soll (h)", "Saldo (h)", "Beleg", "Kilometer", "Projekt / Kostenstelle", "Kunden", "Kunden (h)", "Notiz"]);
   for (const ds of monthDays(mk)) {
     const c = calc(ds), r = c.rec, d = parseDs(ds);
     const absTxt = (r.abs || []).map(a => `${(PARTIAL[a.type] || {}).label || a.type} ${a.from}-${a.to}`).join(", ");
     const cnt = c.counted;
     L([`${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`, WD_LONG[d.getDay()], c.kind === "arbeit" ? (c.soll || r.in ? "Arbeitstag" : "") : c.K.label, c.hol || "", r.ort ? ORTE[r.ort] : (r.in ? ORTE.betrieb : ""),
-      r.in || "", r.ls || "", r.le || "", r.out || "", c.brk ? dec(c.brk) : "", c.worked ? dec(c.worked) : "", absTxt, c.paidAbs ? dec(c.paidAbs) : "",
+      r.in || "", r.ls || "", r.le || "", r.out || "", c.brk ? dec(c.brk) : "", c.kp || "", c.worked ? dec(c.worked) : "", absTxt, c.paidAbs ? dec(c.paidAbs) : "",
       cnt ? dec(c.ist) : "", dec(c.soll), cnt ? dec(c.saldo) : "", r.beleg ? "ja" : "", r.km ? String(r.km).replace(".", ",") : "", r.projekt || "",
       (r.kunden || []).map(k => `${k.name} ${k.from}-${k.to || ""}`).join(", "), (r.kunden || []).length ? dec((r.kunden || []).reduce((a, k) => a + kdMin(k, ds), 0)) : "", r.note || ""]);
   }
@@ -1240,7 +1283,7 @@ function buildCsv(mk) {
   L(["Urlaub (Tage)", String(t.urlaub).replace(".", ",")]); L(["Krankenstand (Tage)", t.krank]); L(["Arbeitsunfall (Tage)", t.unfall]);
   L(["Pflegefreistellung (Tage)", t.pflege]); L(["Sonderurlaub (Tage)", t.sonder]); L(["Schulung / Berufsschule (Tage)", t.schule]);
   L(["Zeitausgleich (Tage)", t.za]); L(["Unbezahlter Urlaub (Tage)", t.unbezahlt]);
-  L(["Arztbesuche (Anzahl)", t.arztN]); L(["Arztbesuche (h)", dec(t.arzt)]); L(["Kilometer gesamt", String(t.km).replace(".", ",")]);
+  L(["Arztbesuche (Anzahl)", t.arztN]); L(["Arztbesuche (h)", dec(t.arzt)]); L(["Kaffeepausen (Anzahl)", t.kpN]); L(["Kaffeepausen (h)", dec(t.kp), S.settings.kpAbzug !== false ? "von Arbeitszeit abgezogen" : "als Arbeitszeit gezählt"]); L(["Kilometer gesamt", String(t.km).replace(".", ",")]);
   const ea = earn(t);
   if (ea.rate) { L([]); L(["Verdienst (brutto)"]); L(["Stunden (h)", dec(ea.min), EARN_BASIS[ea.basis]]); L(["Betrag pro Stunde (EUR)", dec2(ea.rate)]); L(["Gesamtbetrag (EUR)", dec2(ea.sum)]); }
   const cs = customerStats(mk);
@@ -1258,7 +1301,7 @@ function buildReport(mk) {
   const s = S.settings, t = monthStats(mk);
   const lines = [`Arbeitszeitnachweis ${monthName(mk, s.region)}`, s.name ? `${s.name}${s.persnr ? " (Pers.-Nr. " + s.persnr + ")" : ""}` : "", s.firma, "",
     `Soll: ${hm(t.soll)} h`, `Ist: ${hm(t.ist)} h`, `Saldo Monat: ${hmSigned(t.saldo)} h`, `Zeitkonto gesamt: ${hmSigned(totalSaldo(lastDayOf(mk)))} h`, "",
-    `Urlaub: ${String(t.urlaub).replace(".", ",")} Tage`, `Krankenstand: ${t.krank} Tage`, `Arztbesuche: ${t.arztN} (${hm(t.arzt)} h)`, `Zeitausgleich: ${t.za} Tage`];
+    `Urlaub: ${String(t.urlaub).replace(".", ",")} Tage`, `Krankenstand: ${t.krank} Tage`, `Arztbesuche: ${t.arztN} (${hm(t.arzt)} h)`, ...(t.kpN ? [`Kaffeepausen: ${t.kpN} (${hm(t.kp)} h)`] : []), `Zeitausgleich: ${t.za} Tage`];
   if (t.pflege) lines.push(`Pflegefreistellung: ${t.pflege} Tage`);
   if (t.sonder) lines.push(`Sonderurlaub: ${t.sonder} Tage`);
   if (t.unfall) lines.push(`Arbeitsunfall: ${t.unfall} Tage`);
@@ -1335,6 +1378,11 @@ document.addEventListener("click", async e => {
     case "yprev": case "ynext": viewYear += act === "ynext" ? 1 : -1; render(); break;
     case "gomonth": viewMonth = el.dataset.mk; tab = "monat"; render(); window.scrollTo(0, 0); break;
     case "ycsv": { const n = (S.settings.name || "").replace(/[^\wÄÖÜäöüß -]/g, "").trim().replace(/\s+/g, "_"); await offerFile(`Uebersicht_${n ? n + "_" : ""}${viewYear}.csv`, buildYearCsv(viewYear)); break; }
+    case "kpadd": addKaffee(kpDefault()); break;
+    case "kpmore": openKaffee(); break;
+    case "kppick": $("kp-min").value = el.dataset.min; break;
+    case "kprowadd": readDraftInputs(); draft.rec.kp.push({ at: "", min: kpDefault() }); renderEditor(); break;
+    case "kprowdel": readDraftInputs(); draft.rec.kp.splice(+el.dataset.i, 1); renderEditor(); break;
     case "kdstop": {
       const ds = todayDs(), r = clone(getRec(ds) || {}), k = (r.kunden || [])[+el.dataset.i];
       if (!k) break;
@@ -1415,6 +1463,11 @@ document.addEventListener("submit", e => {
     lastUndo = { ds, prev: getRec(ds) ? clone(getRec(ds)) : null };
     setRec(ds, r); closeSheet();
     toast(mode === "start" ? `${name} ab ${from} gestartet` : `${name} ${from}–${to} eingetragen`, true); render();
+  } else if (f.id === "kp-form") {
+    const min = Math.round(Number($("kp-min").value));
+    if (!(min >= 1 && min <= 120)) { toast("Bitte 1 bis 120 Minuten eintragen."); return; }
+    if ($("kp-def").checked) { S.settings.kpMin = min; saveSettings(); }
+    closeSheet(); addKaffee(min);
   } else if (f.id === "partial-form") {
     const ds = $("q-date").value, from = $("q-from").value, to = $("q-to").value, errEl = $("q-err");
     if (!ds || !from || !to || toMin(to) <= toMin(from)) { errEl.textContent = "Bitte Datum, Von und Bis eintragen. Bis muss nach Von liegen."; errEl.hidden = false; return; }
@@ -1454,6 +1507,7 @@ document.addEventListener("submit", e => {
     s.soll = [0, 1, 2, 3, 4, 5, 6].map(i => toMin($("p-soll" + i).value) || 0);
     s.urlaubTage = Number($("p-urlaub").value) || 0; s.urlaubRest = Number($("p-rest").value) || 0;
     s.startSaldo = saldo; s.startDate = $("p-start").value || s.startDate; s.region = $("p-region").value; s.pauseHinweis = $("p-pause").checked;
+    s.kpMin = Math.max(1, Math.min(120, Math.round(Number($("p-kp").value) || 10))); s.kpAbzug = $("p-kpab").checked;
     saveSettings(); toast("Profil gespeichert."); render();
   }
 });
