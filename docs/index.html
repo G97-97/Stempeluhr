@@ -284,6 +284,8 @@ button { cursor: pointer; }
 .kp-btn { background: var(--break-soft); border-color: var(--break); }
 .kp-erow { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) 44px; gap: 8px; align-items: end; }
 .kp-erow .icon-btn { width: 44px; height: 46px; }
+.kd-open { cursor: pointer; min-width: 0; }
+.mat { margin-top: 4px; font-size: 13px; color: var(--break); font-weight: 600; }
 .kd-acts { display: flex; gap: 6px; align-items: center; }
 .kd-tbl { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--surface); }
 .kd-cap { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 8px 8px 12px; background: var(--bg); border-bottom: 1px solid var(--line); }
@@ -768,7 +770,7 @@ function viewHeute() {
   const kd = r.kunden || [], kdRun = kd.findIndex(k => k.from && !k.to);
   const kundenCard = `<section class="card">
     <div class="row"><h2 style="margin:0">Kunden heute</h2>${kd.length ? `<span class="num" style="color:var(--muted);font-size:13px">${hm(kd.reduce((a, k) => a + kdMin(k, ds), 0))} h</span>` : ""}</div>
-    ${kd.length ? `<div class="list">${kd.map((k, i) => `<div class="li"><div><b>${esc(k.name)}</b>${k.to ? "" : ' <span class="chip k-work">läuft</span>'}<small class="num">${esc(k.from)}–${esc(k.to || "jetzt")} · ${hm(kdMin(k, ds))} h${k.note ? " · " + esc(k.note) : ""}</small></div><div class="kd-acts"><button class="btn ghost" data-act="kdnote" data-i="${i}" aria-label="Notiz zu ${esc(k.name)}">${ICON.pen}</button>${k.to ? "" : `<button class="btn primary" data-act="kdstop" data-i="${i}">Fertig</button>`}</div></div>`).join("")}</div>`
+    ${kd.length ? `<div class="list">${kd.map((k, i) => `<div class="li"><div class="kd-open" data-act="kdnote" data-i="${i}" role="button" tabindex="0"><b>${esc(k.name)}</b>${k.to ? "" : ' <span class="chip k-work">läuft</span>'}<small class="num">${esc(k.from)}–${esc(k.to || "jetzt")} · ${hm(kdMin(k, ds))} h${k.note ? " · " + esc(k.note) : ""}</small>${matOf(k.name) ? `<div class="mat">📦 ${esc(matOf(k.name)).replace(/\n/g, " · ")}</div>` : ""}</div><div class="kd-acts"><button class="btn ghost" data-act="kdnote" data-i="${i}" aria-label="Notiz zu ${esc(k.name)}">${ICON.pen}</button>${k.to ? "" : `<button class="btn primary" data-act="kdstop" data-i="${i}">Fertig</button>`}</div></div>`).join("")}</div>`
       : `<p class="hint" style="margin:8px 0 0">Tippe auf „Beim Kunden angekommen“, wenn du bei einer Kundschaft anfängst. Die Zeit läuft, bis du „Fertig“ tippst.</p>`}
     <div class="btn-row" style="margin-top:12px">${kdRun < 0 ? `<button class="btn primary grow" data-act="kdstart" data-ds="${ds}">Beim Kunden angekommen</button>` : ""}<button class="btn grow" data-act="kdadd" data-ds="${ds}">+ Nachtragen</button></div>
   </section>`;
@@ -892,6 +894,11 @@ document.addEventListener("click", e => {
   const el = e.target.closest && e.target.closest('.kd-tr input[type="time"]');
   if (el && el.showPicker) { try { el.showPicker(); } catch (x) {} }
 });
+function showKdMat() {
+  const box = $("k-mat"), n = $("k-name"); if (!box || !n) return;
+  const t = matOf(n.value); box.hidden = !t; box.innerHTML = t ? `<b>📦 Material für ${esc(((S.settings.mat || {})[matKey(n.value)] || {}).name || n.value.trim())}:</b><br>${esc(t).replace(/\n/g, "<br>")}` : "";
+}
+document.addEventListener("input", e => { if (e.target.id === "k-name") showKdMat(); });
 document.addEventListener("input", e => {
   if (e.target.id !== "m-rate" && e.target.id !== "m-basis") return;
   if (e.target.id === "m-basis") { S.settings.rateBasis = e.target.value; $("m-rate").value = String(rateStr(e.target.value)).replace(".", ","); }
@@ -1228,6 +1235,7 @@ function openKunde(ds, mode) {
       ${mode === "start" ? `<div class="field"><label for="k-from">Ankunft</label><input type="time" id="k-from" value="${nowHM()}"></div><input type="hidden" id="k-date" value="${ds}">`
         : `<div class="field"><label for="k-date">Datum</label><input type="date" id="k-date" value="${ds}"></div>
       <div class="grid2"><div class="field"><label for="k-from">Von</label><input type="time" id="k-from"></div><div class="field"><label for="k-to">Bis</label><input type="time" id="k-to"></div></div>`}
+      <div id="k-mat" class="note" hidden></div>
       <div class="field"><label for="k-note">Notiz (optional)</label><input id="k-note" placeholder="z. B. Heizung getauscht"></div>
       <div id="k-err" class="err" hidden></div>
       <div class="sheet-actions"><button class="btn primary grow" type="submit">${mode === "start" ? "Starten" : "Eintragen"}</button><button class="btn grow" type="button" data-act="closesheet-btn">Abbrechen</button></div>
@@ -1252,14 +1260,28 @@ function addKaffee(min, ds = todayDs(), at = nowHM()) {
   setRec(ds, r); try { navigator.vibrate && navigator.vibrate(30); } catch (e) {}
   toast(`Kaffeepause ${min} Min.${ds !== todayDs() ? " am " + fmtShort(ds) : ""} um ${at} eingetragen`, true); render();
 }
+// Materialliste gehört zum Kunden (nicht zum einzelnen Einsatz), damit sie beim nächsten Besuch da ist
+const matKey = n => String(n || "").trim().toLowerCase();
+const matOf = n => ((S.settings.mat || {})[matKey(n)] || {}).text || "";
+function setMat(name, text) {
+  const m = { ...(S.settings.mat || {}) }, k = matKey(name);
+  if (text) m[k] = { name: name.trim(), text, at: Date.now() }; else delete m[k];
+  S.settings.mat = m; saveSettings();
+}
 function openKdNote(i) {
   const k = ((getRec(todayDs()) || {}).kunden || [])[i]; if (!k) return;
-  openSheet(`<h3>${esc(k.name)}</h3><p class="sub">${esc(k.from)}–${esc(k.to || "jetzt")} · Was hast du gemacht?</p>
+  openSheet(`${kdDatalist()}<h3>${esc(k.name)}</h3><p class="sub">${k.to ? "Einsatz bearbeiten" : "Einsatz läuft gerade"}</p>
     <form class="form" id="kdnote-form" data-i="${i}">
-      <div class="field"><label for="kn-text">Aufgabe / Notiz</label><textarea id="kn-text" placeholder="z. B. Heizung getauscht, Material: …">${esc(k.note || "")}</textarea></div>
+      <div class="field"><label for="kn-name">Kunde</label><input id="kn-name" list="kd-list" autocomplete="off" value="${esc(k.name)}"></div>
+      <div class="grid2"><div class="field"><label for="kn-from">Von</label><input type="time" id="kn-from" value="${esc(k.from || "")}"></div>
+        <div class="field"><label for="kn-to">Bis${k.to ? "" : " (leer = läuft)"}</label><input type="time" id="kn-to" value="${esc(k.to || "")}"></div></div>
+      <div class="field"><label for="kn-text">Was gemacht / Notiz</label><textarea id="kn-text" placeholder="z. B. Heizung getauscht">${esc(k.note || "")}</textarea></div>
+      <div class="field"><label for="kn-mat">Material fürs nächste Mal</label><textarea id="kn-mat" placeholder="Eine Sache pro Zeile, z. B.&#10;2× Scharnier 35 mm&#10;Silikon weiß">${esc(matOf(k.name))}</textarea>
+        <small class="hint" style="margin:0">Bleibt bei ${esc(k.name)} gespeichert und wird beim nächsten Einsatz angezeigt. Wenn alles besorgt ist, einfach leeren.</small></div>
+      <div id="kn-err" class="err" hidden></div>
       <div class="sheet-actions"><button class="btn primary grow" type="submit">Speichern</button><button class="btn grow" type="button" data-act="closesheet-btn">Abbrechen</button></div>
+      <button class="btn ghost" type="button" data-act="kddel" data-i="${i}" style="width:100%;color:var(--danger)">Diesen Einsatz löschen</button>
     </form>`);
-  setTimeout(() => { const t = $("kn-text"); if (t) t.focus(); }, 50);
 }
 function openPartial(ds) {
   draft = { partial: true, ds };
@@ -1314,6 +1336,8 @@ function buildCsv(mk) {
     L([]); L(["Kundeneinsätze"]);
     L(["Datum", "Wochentag", "Kunde", "Von", "Bis", "Dauer (h)", "Notiz"]);
     for (const ds of monthDays(mk)) { const r = getRec(ds), d = parseDs(ds); for (const k of (r && r.kunden) || []) L([`${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`, WD_LONG[d.getDay()], k.name, k.from, k.to || "", dec(kdMin(k, ds)), k.note || ""]); }
+    const mats = cs.filter(e => matOf(e.name));
+    if (mats.length) { L([]); L(["Materialliste fürs nächste Mal"]); L(["Kunde", "Material"]); for (const e of mats) for (const x of matOf(e.name).split("\n")) L([e.name, x]); }
     L([]); L(["Summe je Kunde"]); L(["Kunde", "Einsätze", "Stunden (h)"]);
     for (const e of cs) L([e.name, e.n, dec(e.min)]);
   }
@@ -1336,6 +1360,8 @@ function buildReport(mk) {
   if (abs.length) lines.push("", "Abwesenheiten:", ...abs.map(x => "• " + x));
   const cs = customerStats(mk);
   if (cs.length) lines.push("", "Kunden:", ...cs.map(e => `• ${e.name}: ${hm(e.min)} h (${e.n} ${e.n === 1 ? "Einsatz" : "Einsätze"})`));
+  const mats = cs.filter(e => matOf(e.name));
+  if (mats.length) lines.push("", "Material fürs nächste Mal:", ...mats.map(e => `• ${e.name}: ${matOf(e.name).split("\n").join(", ")}`));
   return lines.filter((x, i, a) => !(x === "" && a[i - 1] === "")).join("\n");
 }
 async function offerFile(filename, data) {
@@ -1395,7 +1421,7 @@ document.addEventListener("click", async e => {
     case "partial": openPartial(el.dataset.ds); break;
     case "kdstart": openKunde(el.dataset.ds, "start"); break;
     case "kdadd": openKunde(el.dataset.ds, "add"); break;
-    case "kdpick": $("k-name").value = el.dataset.name; break;
+    case "kdpick": $("k-name").value = el.dataset.name; showKdMat(); break;
     case "closedok": S.settings.closedNotice = null; saveSettings(); render(); break;
     case "closedcsv": { const mk = S.settings.closedNotice; if (!mk) break; const n = (S.settings.name || "").replace(/[^\wÄÖÜäöüß -]/g, "").trim().replace(/\s+/g, "_"); await offerFile(`Arbeitszeit_${n ? n + "_" : ""}${mk}.csv`, buildCsv(mk)); break; }
     case "yprev": case "ynext": viewYear += act === "ynext" ? 1 : -1; render(); break;
@@ -1408,6 +1434,11 @@ document.addEventListener("click", async e => {
     case "kprowadd": readDraftInputs(); draft.rec.kp.push({ at: "", min: kpDefault() }); renderEditor(); break;
     case "kprowdel": readDraftInputs(); draft.rec.kp.splice(+el.dataset.i, 1); renderEditor(); break;
     case "kdnote": openKdNote(+el.dataset.i); break;
+    case "kddel": {
+      const ds = todayDs(), prev = getRec(ds), r = clone(prev || {}); const k = (r.kunden || []).splice(+el.dataset.i, 1)[0];
+      if (!k) break; if (!r.kunden.length) delete r.kunden;
+      lastUndo = { ds, prev: clone(prev) }; setRec(ds, r); closeSheet(); toast(`${k.name} gelöscht`, true); render(); break;
+    }
     case "kdstop": {
       const ds = todayDs(), r = clone(getRec(ds) || {}), k = (r.kunden || [])[+el.dataset.i];
       if (!k) break;
@@ -1491,9 +1522,20 @@ document.addEventListener("submit", e => {
   } else if (f.id === "kdnote-form") {
     const ds = todayDs(), prev = getRec(ds), r = clone(prev || {}), k = (r.kunden || [])[+f.dataset.i];
     if (!k) { closeSheet(); return; }
+    const name = $("kn-name").value.trim(), from = $("kn-from").value, to = $("kn-to").value, err = $("kn-err");
+    const fail = m => { err.textContent = m; err.hidden = false; };
+    if (!name) return fail("Bitte den Namen des Kunden eintragen.");
+    if (!from) return fail("Bitte eine Von-Zeit eintragen.");
+    if (to && to === from) return fail("Von und Bis sind gleich.");
+    if (!to && r.kunden.some((x, j) => j !== +f.dataset.i && x.from && !x.to)) return fail("Es läuft schon ein anderer Kunde. Bitte eine Bis-Zeit eintragen.");
+    k.name = name; k.from = from; if (to) k.to = to; else delete k.to;
     const note = $("kn-text").value.trim(); if (note) k.note = note; else delete k.note;
+    r.kunden.sort((a, b) => a.from.localeCompare(b.from));
     lastUndo = { ds, prev: clone(prev) };
-    setRec(ds, r); closeSheet(); toast(`Notiz bei ${k.name} gespeichert`, true); render();
+    setRec(ds, r);
+    const mat = $("kn-mat").value.split("\n").map(x => x.trim()).filter(Boolean).join("\n");
+    if (mat !== matOf(name)) setMat(name, mat);
+    closeSheet(); toast(`${name} gespeichert`, true); render();
   } else if (f.id === "kp-form") {
     const min = Math.round(Number($("kp-min").value));
     if (!(min >= 1 && min <= 120)) { toast("Bitte 1 bis 120 Minuten eintragen."); return; }
