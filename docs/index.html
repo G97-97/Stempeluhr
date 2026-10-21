@@ -217,9 +217,10 @@ button { cursor: pointer; }
 .note.info { background: var(--blue-soft); border-color: var(--blue); }
 .hint { font-size: 13px; color: var(--muted); margin: 0; }
 
-.quick { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; }
+.quick { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
 .quick button { border: 1px solid var(--line); background: var(--surface); border-radius: 14px; padding: 12px 6px; display: grid; justify-items: center; gap: 6px; font-size: 13px; font-weight: 600; min-height: 76px; }
 .quick button svg { color: var(--accent); }
+.quick button .qi { font-size: 22px; line-height: 24px; }
 
 /* Chips */
 .chip { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; background: var(--surface-2); color: var(--muted); }
@@ -283,6 +284,7 @@ button { cursor: pointer; }
 .kp-btn { background: var(--break-soft); border-color: var(--break); }
 .kp-erow { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) 44px; gap: 8px; align-items: end; }
 .kp-erow .icon-btn { width: 44px; height: 46px; }
+.kd-acts { display: flex; gap: 6px; align-items: center; }
 .kd-tbl { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--surface); }
 .kd-cap { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 8px 8px 12px; background: var(--bg); border-bottom: 1px solid var(--line); }
 .kd-cap b { font-size: 14px; }
@@ -290,6 +292,7 @@ button { cursor: pointer; }
 .kd-plus { width: 40px; height: 40px; border-radius: 50%; border: 0; background: var(--accent); color: #fff; font-size: 26px; line-height: 1; display: grid; place-items: center; font-weight: 500; }
 .kd-tr { display: grid; grid-template-columns: minmax(0,1fr) 72px 72px 32px; gap: 4px; align-items: center; padding: 5px 6px; border-bottom: 1px solid var(--line); }
 .kd-tr:last-child { border-bottom: 0; }
+.kd-tr .kd-note { grid-column: 1 / -1; min-height: 38px; font-size: 14px; }
 .kd-th { font-size: 12px; font-weight: 600; color: var(--muted); padding-top: 6px; padding-bottom: 6px; }
 .kd-th span { padding-left: 4px; }
 .kd-tr input { width: 100%; min-width: 0; min-height: 42px; border: 1px solid var(--line); background: var(--bg); border-radius: 10px; padding: 6px 6px; font-size: 15px; }
@@ -765,7 +768,7 @@ function viewHeute() {
   const kd = r.kunden || [], kdRun = kd.findIndex(k => k.from && !k.to);
   const kundenCard = `<section class="card">
     <div class="row"><h2 style="margin:0">Kunden heute</h2>${kd.length ? `<span class="num" style="color:var(--muted);font-size:13px">${hm(kd.reduce((a, k) => a + kdMin(k, ds), 0))} h</span>` : ""}</div>
-    ${kd.length ? `<div class="list">${kd.map((k, i) => `<div class="li"><div><b>${esc(k.name)}</b>${k.to ? "" : ' <span class="chip k-work">läuft</span>'}<small class="num">${esc(k.from)}–${esc(k.to || "jetzt")} · ${hm(kdMin(k, ds))} h${k.note ? " · " + esc(k.note) : ""}</small></div>${k.to ? `<button class="btn ghost" data-act="edit" data-ds="${ds}" aria-label="Bearbeiten">${ICON.pen}</button>` : `<button class="btn primary" data-act="kdstop" data-i="${i}">Fertig</button>`}</div>`).join("")}</div>`
+    ${kd.length ? `<div class="list">${kd.map((k, i) => `<div class="li"><div><b>${esc(k.name)}</b>${k.to ? "" : ' <span class="chip k-work">läuft</span>'}<small class="num">${esc(k.from)}–${esc(k.to || "jetzt")} · ${hm(kdMin(k, ds))} h${k.note ? " · " + esc(k.note) : ""}</small></div><div class="kd-acts"><button class="btn ghost" data-act="kdnote" data-i="${i}" aria-label="Notiz zu ${esc(k.name)}">${ICON.pen}</button>${k.to ? "" : `<button class="btn primary" data-act="kdstop" data-i="${i}">Fertig</button>`}</div></div>`).join("")}</div>`
       : `<p class="hint" style="margin:8px 0 0">Tippe auf „Beim Kunden angekommen“, wenn du bei einer Kundschaft anfängst. Die Zeit läuft, bis du „Fertig“ tippst.</p>`}
     <div class="btn-row" style="margin-top:12px">${kdRun < 0 ? `<button class="btn primary grow" data-act="kdstart" data-ds="${ds}">Beim Kunden angekommen</button>` : ""}<button class="btn grow" data-act="kdadd" data-ds="${ds}">+ Nachtragen</button></div>
   </section>`;
@@ -796,6 +799,7 @@ function viewHeute() {
   <section class="quick" aria-label="Schnellaktionen">
     <button data-act="partial" data-ds="${ds}">${ICON.steth}Arztbesuch</button>
     <button data-act="tab" data-tab="abw">${ICON.cal}Urlaub / Krank</button>
+    <button data-act="kpnach"><span class="qi">☕</span>Kaffee nachtragen</button>
     <button data-act="edit" data-ds="${ds}">${ICON.pen}Tag bearbeiten</button>
   </section>`;
 }
@@ -1125,7 +1129,8 @@ function renderEditor(err) {
       <input id="e-kn${i}" list="kd-list" autocomplete="off" placeholder="Kunde" aria-label="Kunde ${i + 1}" data-kd="${i}" data-f="name" value="${esc(k.name || "")}">
       <input type="time" id="e-kf${i}" aria-label="Von" data-kd="${i}" data-f="from" value="${esc(k.from || "")}">
       <input type="time" id="e-kb${i}" aria-label="Bis" data-kd="${i}" data-f="to" value="${esc(k.to || "")}">
-      <button type="button" class="icon-btn" data-act="kdrowdel" data-i="${i}" aria-label="Entfernen">${ICON.x}</button></div>`).join("");
+      <button type="button" class="icon-btn" data-act="kdrowdel" data-i="${i}" aria-label="Entfernen">${ICON.x}</button>
+      <input class="kd-note" id="e-kt${i}" aria-label="Was gemacht / Notiz bei ${esc(k.name || "Kunde " + (i + 1))}" placeholder="Was gemacht / Notiz" autocomplete="off" data-kd="${i}" data-f="note" value="${esc(k.note || "")}"></div>`).join("");
   const c = calc(ds, rec);
   openSheet(`${kdDatalist()}
     <h3>${WD_LONG[d.getDay()]}, ${d.getDate()}. ${(S.settings.region === "DE" ? MONTHS_DE : MONTHS)[d.getMonth()]} ${d.getFullYear()}</h3>
@@ -1229,22 +1234,32 @@ function openKunde(ds, mode) {
     </form>`);
 }
 
-function openKaffee() {
-  openSheet(`<h3>Kaffeepause</h3>
-    <p class="sub">Dauer wählen. Die Pause wird ab jetzt eingetragen.</p>
+function openKaffee(nach) {
+  openSheet(`<h3>${nach ? "Kaffeepause nachtragen" : "Kaffeepause"}</h3>
+    <p class="sub">${nach ? "Tag, Uhrzeit und Dauer wählen." : "Dauer wählen. Die Pause wird ab jetzt eingetragen."}</p>
     <form class="form" id="kp-form">
+      ${nach ? `<div class="grid2"><div class="field"><label for="kp-date">Datum</label><input type="date" id="kp-date" value="${todayDs()}" max="${todayDs()}"></div><div class="field"><label for="kp-at">Uhrzeit</label><input type="time" id="kp-at" value="${nowHM()}"></div></div>` : ""}
       <div class="btn-row">${[5, 10, 15, 20, 30].map(m => `<button type="button" class="chip" style="border:0;padding:10px 14px;font-size:14px" data-act="kppick" data-min="${m}">${m} Min.</button>`).join("")}</div>
       <div class="field"><label for="kp-min">Minuten</label><input type="number" inputmode="numeric" min="1" max="120" id="kp-min" value="${kpDefault()}"></div>
       <label class="check"><input type="checkbox" id="kp-def"> Als Standard speichern</label>
       <div class="sheet-actions"><button class="btn primary grow" type="submit">Eintragen</button><button class="btn grow" type="button" data-act="closesheet-btn">Abbrechen</button></div>
     </form>`);
 }
-function addKaffee(min) {
-  const ds = todayDs(), prev = getRec(ds), r = clone(prev || { kind: holidayName(ds) ? "feiertag" : "arbeit" });
-  r.kp = (r.kp || []).concat({ at: nowHM(), min });
+function addKaffee(min, ds = todayDs(), at = nowHM()) {
+  const prev = getRec(ds), r = clone(prev || { kind: holidayName(ds) ? "feiertag" : "arbeit" });
+  r.kp = (r.kp || []).concat({ at, min }).sort((a, b) => (a.at || "").localeCompare(b.at || ""));
   lastUndo = { ds, prev: prev ? clone(prev) : null };
   setRec(ds, r); try { navigator.vibrate && navigator.vibrate(30); } catch (e) {}
-  toast(`Kaffeepause ${min} Min. eingetragen`, true); render();
+  toast(`Kaffeepause ${min} Min.${ds !== todayDs() ? " am " + fmtShort(ds) : ""} um ${at} eingetragen`, true); render();
+}
+function openKdNote(i) {
+  const k = ((getRec(todayDs()) || {}).kunden || [])[i]; if (!k) return;
+  openSheet(`<h3>${esc(k.name)}</h3><p class="sub">${esc(k.from)}–${esc(k.to || "jetzt")} · Was hast du gemacht?</p>
+    <form class="form" id="kdnote-form" data-i="${i}">
+      <div class="field"><label for="kn-text">Aufgabe / Notiz</label><textarea id="kn-text" placeholder="z. B. Heizung getauscht, Material: …">${esc(k.note || "")}</textarea></div>
+      <div class="sheet-actions"><button class="btn primary grow" type="submit">Speichern</button><button class="btn grow" type="button" data-act="closesheet-btn">Abbrechen</button></div>
+    </form>`);
+  setTimeout(() => { const t = $("kn-text"); if (t) t.focus(); }, 50);
 }
 function openPartial(ds) {
   draft = { partial: true, ds };
@@ -1387,10 +1402,12 @@ document.addEventListener("click", async e => {
     case "gomonth": viewMonth = el.dataset.mk; tab = "monat"; render(); window.scrollTo(0, 0); break;
     case "ycsv": { const n = (S.settings.name || "").replace(/[^\wÄÖÜäöüß -]/g, "").trim().replace(/\s+/g, "_"); await offerFile(`Uebersicht_${n ? n + "_" : ""}${viewYear}.csv`, buildYearCsv(viewYear)); break; }
     case "kpadd": addKaffee(kpDefault()); break;
-    case "kpmore": openKaffee(); break;
+    case "kpmore": openKaffee(false); break;
+    case "kpnach": openKaffee(true); break;
     case "kppick": $("kp-min").value = el.dataset.min; break;
     case "kprowadd": readDraftInputs(); draft.rec.kp.push({ at: "", min: kpDefault() }); renderEditor(); break;
     case "kprowdel": readDraftInputs(); draft.rec.kp.splice(+el.dataset.i, 1); renderEditor(); break;
+    case "kdnote": openKdNote(+el.dataset.i); break;
     case "kdstop": {
       const ds = todayDs(), r = clone(getRec(ds) || {}), k = (r.kunden || [])[+el.dataset.i];
       if (!k) break;
@@ -1471,11 +1488,19 @@ document.addEventListener("submit", e => {
     lastUndo = { ds, prev: getRec(ds) ? clone(getRec(ds)) : null };
     setRec(ds, r); closeSheet();
     toast(mode === "start" ? `${name} ab ${from} gestartet` : `${name} ${from}–${to} eingetragen`, true); render();
+  } else if (f.id === "kdnote-form") {
+    const ds = todayDs(), prev = getRec(ds), r = clone(prev || {}), k = (r.kunden || [])[+f.dataset.i];
+    if (!k) { closeSheet(); return; }
+    const note = $("kn-text").value.trim(); if (note) k.note = note; else delete k.note;
+    lastUndo = { ds, prev: clone(prev) };
+    setRec(ds, r); closeSheet(); toast(`Notiz bei ${k.name} gespeichert`, true); render();
   } else if (f.id === "kp-form") {
     const min = Math.round(Number($("kp-min").value));
     if (!(min >= 1 && min <= 120)) { toast("Bitte 1 bis 120 Minuten eintragen."); return; }
     if ($("kp-def").checked) { S.settings.kpMin = min; saveSettings(); }
-    closeSheet(); addKaffee(min);
+    const ds = $("kp-date") ? $("kp-date").value : todayDs(), at = $("kp-at") ? $("kp-at").value : nowHM();
+    if (!ds || !at) { toast("Bitte Datum und Uhrzeit eintragen."); return; }
+    closeSheet(); addKaffee(min, ds, at);
   } else if (f.id === "partial-form") {
     const ds = $("q-date").value, from = $("q-from").value, to = $("q-to").value, errEl = $("q-err");
     if (!ds || !from || !to || toMin(to) <= toMin(from)) { errEl.textContent = "Bitte Datum, Von und Bis eintragen. Bis muss nach Von liegen."; errEl.hidden = false; return; }
