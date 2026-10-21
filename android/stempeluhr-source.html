@@ -194,6 +194,7 @@ button { cursor: pointer; }
 .kd-tr input { width: 100%; min-width: 0; min-height: 42px; border: 1px solid var(--line); background: var(--bg); border-radius: 10px; padding: 6px 6px; font-size: 15px; }
 .kd-tr input[type=time] { padding: 6px 2px; text-align: center; }
 .kd-tr input[type=time]::-webkit-calendar-picker-indicator { display: none; }
+.no-picker .kd-tr input[type=time]::-webkit-calendar-picker-indicator { display: block; }
 .kd-tr .icon-btn { width: 32px; height: 42px; border-radius: 10px; }
 .kd-empty { padding: 12px; color: var(--muted); font-size: 13.5px; }
 
@@ -778,6 +779,13 @@ function earnOut(e) {
   return e.rate ? `<span>${dec(e.min)} h × ${eur(e.rate)}</span><b>${eur(e.sum)}</b><small>${EARN_HINT[e.basis]}. Brutto, vor Steuern und Abgaben. Zählt Tage bis heute.</small>`
     : `<small>Trag einen Betrag pro Stunde ein, dann wird der Gesamtbetrag für den Monat ausgerechnet.</small>`;
 }
+// Kundentabelle: Zeitfelder ohne Uhr-Symbol (Platz). Ein Tipp öffnet deshalb selbst die Zeitauswahl,
+// sonst lässt sich die Zeit auf Android nicht verstellen.
+if (!("showPicker" in HTMLInputElement.prototype)) document.documentElement.classList.add("no-picker");
+document.addEventListener("click", e => {
+  const el = e.target.closest && e.target.closest('.kd-tr input[type="time"]');
+  if (el && el.showPicker) { try { el.showPicker(); } catch (x) {} }
+});
 document.addEventListener("input", e => {
   if (e.target.id !== "m-rate" && e.target.id !== "m-basis") return;
   if (e.target.id === "m-basis") { S.settings.rateBasis = e.target.value; $("m-rate").value = String(rateStr(e.target.value)).replace(".", ","); }
