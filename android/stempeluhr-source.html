@@ -186,6 +186,19 @@ button { cursor: pointer; }
 .kd-open { cursor: pointer; min-width: 0; }
 .mat { margin-top: 4px; font-size: 13px; color: var(--break); font-weight: 600; }
 .kd-acts { display: flex; gap: 6px; align-items: center; }
+#print-root { position: fixed; inset: 0; z-index: 60; overflow: auto; background: var(--bg); padding: 12px 12px 40px; }
+.pr-bar { position: sticky; top: 0; display: flex; gap: 8px; padding: 8px 0; background: var(--bg); z-index: 1; }
+.pr-hint { font-size: 13px; color: var(--muted); margin: 0 0 10px; }
+.pr-page { background: #fff; color: #111; border-radius: 8px; padding: 14px; overflow-x: auto; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
+body.printing { overflow: hidden; }
+@media print {
+  @page { size: A4 landscape; margin: 10mm; }
+  body.printing > *:not(#print-root) { display: none !important; }
+  html, body.printing { background: #fff !important; }
+  body.printing #print-root { position: static; overflow: visible; padding: 0; background: #fff; }
+  body.printing .pr-bar, body.printing .pr-hint { display: none !important; }
+  body.printing .pr-page { box-shadow: none; padding: 0; border-radius: 0; overflow: visible; }
+}
 .kd-tbl { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--surface); }
 .kd-cap { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 8px 8px 12px; background: var(--bg); border-bottom: 1px solid var(--line); }
 .kd-cap b { font-size: 14px; }
@@ -258,6 +271,7 @@ button { cursor: pointer; }
   </div>
 </nav>
 
+<div id="print-root" hidden></div>
 <div id="sheet-root"></div>
 <div id="toast-root"></div>
 <input type="file" id="import-file" accept="application/json,.json" hidden>
@@ -765,8 +779,9 @@ function viewMonat() {
       <div class="sep"></div>
       <dt>Zeitkonto Ende ${monthName(mk, S.settings.region)}</dt><dd class="${totalSaldo(lastDayOf(mk)) >= 0 ? "pos" : "neg"}">${hmSigned(totalSaldo(lastDayOf(mk)))}</dd>
     </dl>
-    <div class="btn-row" style="margin-top:14px">
-      <button class="btn primary grow" data-act="csv">${ICON.dl} CSV für Buchhaltung</button>
+    <button class="btn primary" style="width:100%;margin-top:14px" data-act="nachweis">${ICON.dl} Stundennachweis für den Chef (PDF)</button>
+    <div class="btn-row" style="margin-top:8px">
+      <button class="btn grow" data-act="csv">CSV für Excel</button>
       <button class="btn grow" data-act="report">${ICON.copy} Bericht als Text</button>
     </div>
   </section>
@@ -1200,6 +1215,86 @@ function openPartial(ds) {
     </form>`);
 }
 
+/* ---------- Stundennachweis (zum Drucken / als PDF) ---------- */
+function monthCarry(mk) {
+  const first = `${mk}-01`;
+  return first <= S.settings.startDate ? (Number(S.settings.startSaldo) || 0) : totalSaldo(addDays(first, -1));
+}
+function dayRemark(c) {
+  const r = c.rec, out = [];
+  if (c.kind !== "arbeit") out.push(c.kind === "feiertag" && c.hol ? c.hol : c.K.label);
+  else if (c.hol) out.push(c.hol);
+  for (const a of r.abs || []) out.push(`${(PARTIAL[a.type] || {}).label || a.type} ${a.from}–${a.to}`);
+  if (c.kp) out.push(`Kaffee ${c.kp} Min.`);
+  if (c.incomplete) out.push("Stempelung unvollständig");
+  if (c.missing) out.push("keine Zeiten");
+  return out.join(", ");
+}
+function buildNachweis(mk) {
+  const s = S.settings, t = monthStats(mk), ub = monthCarry(mk), today = todayDs();
+  const h = m => m ? hm(m) : "";
+  const sg = m => m ? hmSigned(m) : "";
+  const rows = monthDays(mk).map(ds => {
+    const c = calc(ds), r = c.rec, d = parseDs(ds), we = d.getDay() === 0 || d.getDay() === 6;
+    const diff = c.counted && (c.saldo || c.ist) ? c.saldo : 0;
+    return `<tr class="${we ? "we" : ""} ${c.kind !== "arbeit" ? "abs" : ""}"><td>${pad(d.getDate())}.${pad(d.getMonth() + 1)}.</td><td>${WD[d.getDay()]}</td><td>${esc(r.in || "")}</td><td>${esc(r.out || "")}</td>
+      <td>${h(c.brk + c.kp)}</td><td><b>${h(c.worked)}</b></td><td>${h(c.soll)}</td><td>${c.counted ? h(c.ist) : ""}</td><td class="${diff > 0 ? "plus" : diff < 0 ? "minus" : ""}">${sg(diff)}</td><td class="bem">${esc(dayRemark(c))}</td></tr>`;
+  }).join("");
+  const ueRate = rateNum("ueber");
+  const asOf = lastDayOf(mk) < `${mk}-${pad(daysInMonth(mk))}` ? `Stand ${fmtDate(Date.now())} (Monat läuft noch)` : "";
+  return `<div class="nw">
+  <div class="nw-head"><div><h1>Stundennachweis ${esc(monthName(mk, s.region))}</h1>
+    <p>${esc(s.name || "Name: ________________")}${s.persnr ? ` · Pers.-Nr. ${esc(s.persnr)}` : ""}${s.firma ? ` · ${esc(s.firma)}` : ""}</p></div>
+    <p class="small">${asOf || `Erstellt am ${fmtDate(Date.now())}`}</p></div>
+  <table class="nw-t">
+    <thead><tr><th>Datum</th><th>Tag</th><th>Beginn</th><th>Ende</th><th>Pause</th><th>Arbeitszeit</th><th>Soll</th><th>Ist</th><th>Über&shy;stunden</th><th>Bemerkung</th></tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr><td colspan="4">Summe</td><td>${hm(t.brk + t.kp)}</td><td>${hm(t.worked)}</td><td>${hm(t.soll)}</td><td>${hm(t.ist)}</td><td class="${t.saldo >= 0 ? "plus" : "minus"}">${hmSigned(t.saldo)}</td><td></td></tr></tfoot>
+  </table>
+  <div class="nw-bottom"><div class="nw-sum">
+    <table>
+      <tr><td>Soll-Stunden</td><td>${hm(t.soll)} h</td><td class="dec">${dec(t.soll)} h</td></tr>
+      <tr><td>Ist-Stunden (inkl. Urlaub, Krankenstand, Feiertag)</td><td>${hm(t.ist)} h</td><td class="dec">${dec(t.ist)} h</td></tr>
+      <tr class="big"><td>${t.saldo >= 0 ? "Überstunden" : "Minusstunden"} in diesem Monat</td><td>${hmSigned(t.saldo)} h</td><td class="dec">${dec(t.saldo)} h</td></tr>
+      ${ueRate && t.saldo > 0 ? `<tr><td>Auszahlung bei ${eur(ueRate)} pro Überstunde (brutto)</td><td colspan="2">${eur(Math.round(t.saldo / 60 * ueRate * 100) / 100)}</td></tr>` : ""}
+      <tr><td>Übertrag aus Vormonat</td><td>${hmSigned(ub)} h</td><td class="dec">${dec(ub)} h</td></tr>
+      <tr><td>Zeitkonto am Monatsende</td><td>${hmSigned(ub + t.saldo)} h</td><td class="dec">${dec(ub + t.saldo)} h</td></tr>
+    </table>
+    <p class="small">Urlaub ${String(t.urlaub).replace(".", ",")} Tage · Krankenstand ${t.krank} Tage · Arztbesuche ${hm(t.arzt)} h${t.kpN ? ` · Kaffeepausen ${t.kpN}× (${S.settings.kpAbzug !== false ? "abgezogen" : "bezahlt"})` : ""}${t.km ? ` · ${String(t.km).replace(".", ",")} km` : ""}</p>
+  </div>
+  <div class="nw-sign"><div>Datum, Unterschrift Mitarbeiter</div><div>Datum, Unterschrift Arbeitgeber</div></div></div>
+</div>`;
+}
+const NW_CSS = `.nw{font:10.5pt/1.35 system-ui,Arial,sans-serif;color:#111;background:#fff}
+.nw h1{font-size:13pt;margin:0}.nw p{margin:0}.nw .small{font-size:8.5pt;color:#555}
+.nw-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;border-bottom:2px solid #0E6B57;padding-bottom:4px;margin-bottom:6px}
+.nw-t{width:100%;border-collapse:collapse;font-size:8pt;line-height:1.25;font-variant-numeric:tabular-nums}
+.nw-t th{background:#0E6B57;color:#fff;font-weight:600;text-align:left;padding:3px 4px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.nw-t td{padding:0 4px;border-bottom:1px solid #ddd;white-space:nowrap}
+.nw-t td.bem{white-space:normal;font-size:8pt;color:#444}
+.nw-t tr.we td{background:#f3f3f3;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.nw-t tr.abs td.bem{color:#0E6B57;font-weight:600}
+.nw-t td.plus{color:#0E6B57;font-weight:700}.nw-t td.minus{color:#B3261E;font-weight:700}
+.nw-t tfoot td{border-top:2px solid #111;border-bottom:0;font-weight:700;padding-top:4px}
+.nw-bottom{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:24px;align-items:end;margin-top:8px;break-inside:avoid}
+.nw-sum{display:grid;gap:4px}.nw-sum table{border-collapse:collapse;font-size:9pt;max-width:520px}
+.nw-sum td{padding:1px 10px 1px 0}.nw-sum td:nth-child(n+2){text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
+.nw-sum td.dec{color:#666;font-weight:400}.nw-sum tr.big td{font-size:11pt;font-weight:800;border-top:1px solid #111;border-bottom:1px solid #111;padding:2px 10px 2px 0}
+.nw-sign{display:grid;gap:30px;padding-bottom:2px}.nw-sign div{border-top:1px solid #111;padding-top:3px;font-size:8.5pt;color:#555}`;
+function openNachweis(mk) {
+  const root = $("print-root");
+  root.innerHTML = `<div class="pr-bar"><button class="btn primary grow" data-act="nwprint">${ICON.dl} Drucken / als PDF</button><button class="btn" data-act="nwfile">Datei</button><button class="btn" data-act="nwclose" aria-label="Schließen">${ICON.x}</button></div>
+    <p class="pr-hint">Im Druckfenster „Als PDF speichern“ wählen, dann kannst du die Datei dem Chef schicken. Querformat passt am besten.</p>
+    <div class="pr-page">${buildNachweis(mk)}</div>`;
+  root.hidden = false; document.body.classList.add("printing"); root.scrollTop = 0;
+}
+(() => { const st = document.createElement("style"); st.textContent = NW_CSS; document.head.appendChild(st); })();
+function closeNachweis() { const r = $("print-root"); r.hidden = true; r.innerHTML = ""; document.body.classList.remove("printing"); }
+function nachweisFile(mk) {
+  return `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Stundennachweis ${esc(monthName(mk, S.settings.region))}</title>
+<style>@page{size:A4 landscape;margin:10mm}body{margin:0;padding:12px;background:#fff}${NW_CSS}</style></head><body>${buildNachweis(mk)}</body></html>`;
+}
+
 /* ---------- Export ---------- */
 function csvCell(v) { v = String(v ?? ""); return /[;"\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; }
 function buildCsv(mk) {
@@ -1209,20 +1304,25 @@ function buildCsv(mk) {
   L(["Name", s.name]); L(["Personalnummer", s.persnr]); L(["Firma / Abteilung", s.firma]);
   L(["Erstellt am", new Date().toLocaleString("de-AT")]);
   L([]);
-  L(["Datum", "Wochentag", "Art", "Feiertag", "Arbeitsort", "Arbeitsbeginn", "Mittag Anfang", "Mittag Ende", "Arbeitsende", "Pause (h)", "Kaffeepause (Min.)", "Arbeitszeit (h)", "Stundenweise Abwesenheit", "Abwesenheit bezahlt (h)", "Ist (h)", "Soll (h)", "Saldo (h)", "Beleg", "Kilometer", "Projekt / Kostenstelle", "Kunden", "Kunden (h)", "Notiz"]);
+  // Die ersten Spalten sind das, was der Chef braucht; Details folgen dahinter
+  L(["Datum", "Wochentag", "Beginn", "Ende", "Pause (h)", "Arbeitszeit (h)", "Soll (h)", "Ist (h)", "Überstunden (h)", "Bemerkung",
+    "Mittag Anfang", "Mittag Ende", "Kaffeepause (Min.)", "Arbeitsort", "Stundenweise Abwesenheit", "Beleg", "Kilometer", "Projekt / Kostenstelle", "Kunden", "Kunden (h)", "Notiz"]);
   for (const ds of monthDays(mk)) {
-    const c = calc(ds), r = c.rec, d = parseDs(ds);
+    const c = calc(ds), r = c.rec, d = parseDs(ds), cnt = c.counted;
     const absTxt = (r.abs || []).map(a => `${(PARTIAL[a.type] || {}).label || a.type} ${a.from}-${a.to}`).join(", ");
-    const cnt = c.counted;
-    L([`${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`, WD_LONG[d.getDay()], c.kind === "arbeit" ? (c.soll || r.in ? "Arbeitstag" : "") : c.K.label, c.hol || "", r.ort ? ORTE[r.ort] : (r.in ? ORTE.betrieb : ""),
-      r.in || "", r.ls || "", r.le || "", r.out || "", c.brk ? dec(c.brk) : "", c.kp || "", c.worked ? dec(c.worked) : "", absTxt, c.paidAbs ? dec(c.paidAbs) : "",
-      cnt ? dec(c.ist) : "", dec(c.soll), cnt ? dec(c.saldo) : "", r.beleg ? "ja" : "", r.km ? String(r.km).replace(".", ",") : "", r.projekt || "",
+    L([`${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`, WD_LONG[d.getDay()], r.in || "", r.out || "", (c.brk + c.kp) ? dec(c.brk + c.kp) : "", c.worked ? dec(c.worked) : "",
+      dec(c.soll), cnt ? dec(c.ist) : "", cnt && (c.saldo || c.ist) ? dec(c.saldo) : "", dayRemark(c),
+      r.ls || "", r.le || "", c.kp || "", r.in ? (ORTE[r.ort || "betrieb"] || r.ort) : "", absTxt, r.beleg ? "ja" : "", r.km ? String(r.km).replace(".", ",") : "", r.projekt || "",
       (r.kunden || []).map(k => `${k.name} ${k.from}-${k.to || ""}`).join(", "), (r.kunden || []).length ? dec((r.kunden || []).reduce((a, k) => a + kdMin(k, ds), 0)) : "", r.note || ""]);
   }
+  const ub = monthCarry(mk);
+  L(["Summe", "", "", "", dec(t.brk + t.kp), dec(t.worked), dec(t.soll), dec(t.ist), dec(t.saldo), ""]);
+  L([]);
+  L(["Überstunden"]); L(["Übertrag Vormonat (h)", dec(ub)]); L(["Überstunden dieser Monat (h)", dec(t.saldo)]); L(["Zeitkonto Monatsende (h)", dec(ub + t.saldo)]);
   L([]);
   L(["Zusammenfassung"]);
   L(["Soll-Stunden", dec(t.soll)]); L(["Ist-Stunden", dec(t.ist)]); L(["davon reine Arbeitszeit", dec(t.worked)]);
-  L(["Saldo Monat (h)", dec(t.saldo)]); L(["Zeitkonto Monatsende (h)", dec(totalSaldo(lastDayOf(mk)))]);
+
   L(["Urlaub (Tage)", String(t.urlaub).replace(".", ",")]); L(["Krankenstand (Tage)", t.krank]); L(["Arbeitsunfall (Tage)", t.unfall]);
   L(["Pflegefreistellung (Tage)", t.pflege]); L(["Sonderurlaub (Tage)", t.sonder]); L(["Schulung / Berufsschule (Tage)", t.schule]);
   L(["Zeitausgleich (Tage)", t.za]); L(["Unbezahlter Urlaub (Tage)", t.unbezahlt]);
@@ -1263,10 +1363,11 @@ function buildReport(mk) {
   return lines.filter((x, i, a) => !(x === "" && a[i - 1] === "")).join("\n");
 }
 async function offerFile(filename, data) {
-  if (window.AndroidBridge) { AndroidBridge.saveFile(filename, filename.endsWith(".csv") ? "text/csv" : "application/json", data); return; }
+  const mime = filename.endsWith(".csv") ? "text/csv" : filename.endsWith(".html") ? "text/html" : "application/json";
+  if (window.AndroidBridge) { AndroidBridge.saveFile(filename, mime, data); return; }
   if (window.STEMPELUHR_OFFLINE) {
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([data], { type: filename.endsWith(".csv") ? "text/csv;charset=utf-8" : "application/json" }));
+    a.href = URL.createObjectURL(new Blob([data], { type: mime + ";charset=utf-8" }));
     a.download = filename; document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
     toast("Datei wird in Downloads gespeichert."); return;
@@ -1332,6 +1433,10 @@ document.addEventListener("click", async e => {
     case "kprowadd": readDraftInputs(); draft.rec.kp.push({ at: "", min: kpDefault() }); renderEditor(); break;
     case "kprowdel": readDraftInputs(); draft.rec.kp.splice(+el.dataset.i, 1); renderEditor(); break;
     case "kdnote": openKdNote(+el.dataset.i); break;
+    case "nachweis": openNachweis(viewMonth); break;
+    case "nwclose": closeNachweis(); break;
+    case "nwprint": try { window.print(); } catch (x) { toast("Drucken geht hier nicht. Tippe auf „Datei“."); } break;
+    case "nwfile": await offerFile(`Stundennachweis_${(S.settings.name || "").replace(/[^\wÄÖÜäöüß -]/g, "").trim().replace(/\s+/g, "_") || "Mitarbeiter"}_${viewMonth}.html`, nachweisFile(viewMonth)); break;
     case "kddel": {
       const ds = todayDs(), prev = getRec(ds), r = clone(prev || {}); const k = (r.kunden || []).splice(+el.dataset.i, 1)[0];
       if (!k) break; if (!r.kunden.length) delete r.kunden;
@@ -1494,6 +1599,7 @@ $("import-file").addEventListener("change", e => {
 });
 window.__onImport = () => { const t = window.AndroidBridge && AndroidBridge.getImported(); if (t) importText(t); };
 window.__onBack = () => {
+  if (!$("print-root").hidden) { closeNachweis(); return; }
   if ($("sheet-root").innerHTML) { closeSheet(); return; }
   if (tab !== "heute") { tab = "heute"; render(); window.scrollTo(0, 0); return; }
   if (window.AndroidBridge) AndroidBridge.exit();
