@@ -896,7 +896,7 @@ function viewMonat() {
       <div class="sep"></div>
       <dt>Zeitkonto Ende ${monthName(mk, S.settings.region)}</dt><dd class="${totalSaldo(lastDayOf(mk)) >= 0 ? "pos" : "neg"}">${hmSigned(totalSaldo(lastDayOf(mk)))}</dd>
     </dl>
-    <button class="btn primary" style="width:100%;margin-top:14px" data-act="nachweis">${ICON.dl} Stundennachweis für den Chef (PDF)</button>
+    <button class="btn primary" style="width:100%;margin-top:14px" data-act="nachweis">${ICON.dl} PDF Stundenaufzeichnung</button>
     <div class="btn-row" style="margin-top:8px">
       <button class="btn grow" data-act="xlsx">${ICON.dl} Excel-Datei</button>
       <button class="btn grow" data-act="csv">CSV</button>
@@ -1333,7 +1333,7 @@ function openPartial(ds) {
     </form>`);
 }
 
-/* ---------- Stundennachweis (zum Drucken / als PDF) ---------- */
+/* ---------- Stundenaufzeichnung (zum Drucken / als PDF) ---------- */
 function monthCarry(mk) {
   const first = `${mk}-01`;
   return first <= S.settings.startDate ? (Number(S.settings.startSaldo) || 0) : totalSaldo(addDays(first, -1));
@@ -1361,7 +1361,7 @@ function buildNachweis(mk) {
   const ueRate = rateNum("ueber");
   const asOf = lastDayOf(mk) < `${mk}-${pad(daysInMonth(mk))}` ? `Stand ${fmtDate(Date.now())} (Monat läuft noch)` : "";
   return `<div class="nw">
-  <div class="nw-head"><div><h1>Stundennachweis ${esc(monthName(mk, s.region))}</h1>
+  <div class="nw-head"><div><h1>Stundenaufzeichnung ${esc(monthName(mk, s.region))}</h1>
     <p>${esc(s.name || "Name: ________________")}${s.persnr ? ` · Pers.-Nr. ${esc(s.persnr)}` : ""}${s.firma ? ` · ${esc(s.firma)}` : ""}</p></div>
     <p class="small">${asOf || `Erstellt am ${fmtDate(Date.now())}`}</p></div>
   <table class="nw-t">
@@ -1409,11 +1409,11 @@ function openNachweis(mk) {
 (() => { const st = document.createElement("style"); st.textContent = NW_CSS; document.head.appendChild(st); })();
 function closeNachweis() { const r = $("print-root"); r.hidden = true; r.innerHTML = ""; document.body.classList.remove("printing"); }
 function nachweisFile(mk) {
-  return `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Stundennachweis ${esc(monthName(mk, S.settings.region))}</title>
+  return `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Stundenaufzeichnung ${esc(monthName(mk, S.settings.region))}</title>
 <style>@page{size:A4 landscape;margin:10mm}body{margin:0;padding:12px;background:#fff}${NW_CSS}</style></head><body>${buildNachweis(mk)}</body></html>`;
 }
 
-/* ---------- Stundennachweis als Bild (PNG) zum Weiterschicken ---------- */
+/* ---------- Stundenaufzeichnung als Bild (PNG) zum Weiterschicken ---------- */
 function nachweisPng(mk) {
   const s = S.settings, t = monthStats(mk), ub = monthCarry(mk), days = monthDays(mk);
   const W = 1500, RH = 34, top = 130, headH = 42, sumH = 300;
@@ -1422,7 +1422,7 @@ function nachweisPng(mk) {
   const g = cv.getContext("2d"), F = (w, px) => `${w} ${px}px Arial, "Helvetica Neue", sans-serif`;
   g.fillStyle = "#fff"; g.fillRect(0, 0, W, H); g.textBaseline = "middle";
   const GREEN = "#0E6B57", RED = "#B3261E", GRAY = "#555";
-  g.fillStyle = "#111"; g.font = F(700, 38); g.fillText(`Stundennachweis ${monthName(mk, s.region)}`, 40, 52);
+  g.fillStyle = "#111"; g.font = F(700, 38); g.fillText(`Stundenaufzeichnung ${monthName(mk, s.region)}`, 40, 52);
   g.font = F(400, 24); g.fillStyle = GRAY;
   g.fillText([s.name || "Name: ______________", s.persnr ? "Pers.-Nr. " + s.persnr : "", s.firma].filter(Boolean).join("  ·  "), 40, 96);
   const asOf = lastDayOf(mk) < `${mk}-${pad(daysInMonth(mk))}` ? `Stand ${fmtDate(Date.now())} (Monat läuft noch)` : `Erstellt am ${fmtDate(Date.now())}`;
@@ -1529,7 +1529,7 @@ function buildXlsx(mk) {
   const tm = hhmm => { const m = toMin(hhmm); return m == null ? null : { n: m / 1440, s: 2 }; };
   const num = (m, st = 3) => m ? { n: H(m), s: st } : null;
   const rows = [
-    [{ t: `Stundennachweis ${monthName(mk, s.region)}`, s: 6 }],
+    [{ t: `Stundenaufzeichnung ${monthName(mk, s.region)}`, s: 6 }],
     [[s.name, s.persnr ? "Pers.-Nr. " + s.persnr : "", s.firma].filter(Boolean).join(" · ") || "Name:"],
     [],
     ["Datum", "Tag", "Beginn", "Ende", "Pause (h)", "Arbeitszeit (h)", "Betrieb (h)", "Soll (h)", "Ist (h)", "Überstunden (h)", "Bemerkung", "Kunden", "Notiz"].map(x => ({ t: x, s: 1 }))
@@ -1553,7 +1553,7 @@ function buildXlsx(mk) {
   if (ueRate && t.saldo > 0) rows.push([`Auszahlung Überstunden (brutto, ${dec2(ueRate)} € pro Stunde)`, null, null, null, null, { f: `ROUND(F${rows.length - 2}*${ueRate},2)`, v: Math.round(H(t.saldo) * ueRate * 100) / 100, s: 4 }]);
   rows.push(["Urlaub (Tage)", null, null, null, null, { n: t.urlaub, s: 0 }], ["Krankenstand (Tage)", null, null, null, null, { n: t.krank, s: 0 }], ["Arztbesuche (h)", null, null, null, null, { n: H(t.arzt), s: 3 }]);
   rows.push([], [], ["Datum, Unterschrift Mitarbeiter", null, null, null, null, null, null, "Datum, Unterschrift Arbeitgeber"]);
-  const sheets = [["Stundennachweis", sheetXml(rows, [12, 5, 8, 8, 9, 13, 10, 8, 8, 14, 28, 36, 30], 4)]];
+  const sheets = [["Stundenaufzeichnung", sheetXml(rows, [12, 5, 8, 8, 9, 13, 10, 8, 8, 14, 28, 36, 30], 4)]];
   // zweites Blatt: Kundeneinsätze und Material
   const kr = [[{ t: `Kundeneinsätze ${monthName(mk, s.region)}`, s: 6 }], [], ["Datum", "Tag", "Kunde", "Von", "Bis", "Dauer (h)", "Notiz"].map(x => ({ t: x, s: 1 }))];
   const kFirst = kr.length + 1;
@@ -1735,11 +1735,11 @@ document.addEventListener("click", async e => {
       toast(msg, true); render(); break;
     }
     case "nachweis": openNachweis(viewMonth); break;
-    case "xlsx": { const n = (S.settings.name || "").replace(/[^\wÄÖÜäöüß -]/g, "").trim().replace(/\s+/g, "_"); await offerFile(`Stundennachweis_${n ? n + "_" : ""}${viewMonth}.xlsx`, buildXlsx(viewMonth)); break; }
+    case "xlsx": { const n = (S.settings.name || "").replace(/[^\wÄÖÜäöüß -]/g, "").trim().replace(/\s+/g, "_"); await offerFile(`Stundenaufzeichnung_${n ? n + "_" : ""}${viewMonth}.xlsx`, buildXlsx(viewMonth)); break; }
     case "nwclose": closeNachweis(); break;
-    case "nwpng": { const n = (S.settings.name || "").replace(/[^\wÄÖÜäöüß -]/g, "").trim().replace(/\s+/g, "_"); await shareOrSave(`Stundennachweis_${n ? n + "_" : ""}${viewMonth}.png`, await nachweisPng(viewMonth), `Stundennachweis ${monthName(viewMonth, S.settings.region)}`); break; }
+    case "nwpng": { const n = (S.settings.name || "").replace(/[^\wÄÖÜäöüß -]/g, "").trim().replace(/\s+/g, "_"); await shareOrSave(`Stundenaufzeichnung_${n ? n + "_" : ""}${viewMonth}.png`, await nachweisPng(viewMonth), `Stundenaufzeichnung ${monthName(viewMonth, S.settings.region)}`); break; }
     case "nwprint": try { window.print(); } catch (x) { toast("Drucken geht hier nicht. Tippe auf „Datei“."); } break;
-    case "nwfile": await offerFile(`Stundennachweis_${(S.settings.name || "").replace(/[^\wÄÖÜäöüß -]/g, "").trim().replace(/\s+/g, "_") || "Mitarbeiter"}_${viewMonth}.html`, nachweisFile(viewMonth)); break;
+    case "nwfile": await offerFile(`Stundenaufzeichnung_${(S.settings.name || "").replace(/[^\wÄÖÜäöüß -]/g, "").trim().replace(/\s+/g, "_") || "Mitarbeiter"}_${viewMonth}.html`, nachweisFile(viewMonth)); break;
     case "kddel": {
       const ds = todayDs(), prev = getRec(ds), r = clone(prev || {}); const k = (r.kunden || []).splice(+el.dataset.i, 1)[0];
       if (!k) break; if (!r.kunden.length) delete r.kunden;
