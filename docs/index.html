@@ -204,6 +204,13 @@ button { cursor: pointer; }
 .stamp.set { border-color: var(--accent); background: var(--accent-soft); }
 .stamp.set span { color: var(--accent); }
 .stamp.next { border-style: dashed; border-color: var(--ink); }
+.stamp-betr { width: 100%; margin-top: 6px; display: grid; grid-template-columns: auto 1fr; grid-template-areas: "l v" "s s"; gap: 0 10px; align-items: baseline; text-align: left; border: 1px solid var(--line); border-radius: 12px; padding: 9px 12px; background: var(--bg); color: inherit; font: inherit; }
+.stamp-betr span { grid-area: l; font-size: 13px; font-weight: 600; color: var(--muted); }
+.stamp-betr b { grid-area: v; text-align: right; font-family: var(--f-num); font-size: 16px; font-weight: 600; }
+.stamp-betr small { grid-area: s; font-size: 11.5px; color: var(--muted); }
+.stamp-betr.set { border-color: var(--accent); background: var(--accent-soft); }
+.stamp-betr.run { border-color: var(--blue); background: var(--blue-soft); }
+.stamp-betr.run span, .stamp-betr.run b { color: var(--blue); }
 
 .tiles { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
 .tile { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; min-width: 0; }
@@ -582,16 +589,20 @@ async function connect() {
 /* ---------- Kunden ---------- */
 const kdDur = k => (k.from && k.to) ? ((toMin(k.to) - toMin(k.from)) + 1440) % 1440 : 0;
 const kdMin = (k, ds) => k.to ? kdDur(k) : (ds === todayDs() && k.from ? Math.max(0, nowMin() - toMin(k.from)) : 0);
+// „Betrieb“ ist ein Einsatz wie ein Kunde (Von–Bis), zählt aber nicht als Kundschaft
+const BETRIEB = "Betrieb";
+const isBetr = k => String(k.name || "").trim().toLowerCase() === "betrieb";
+const betrMin = (r, ds) => ((r && r.kunden) || []).filter(isBetr).reduce((a, k) => a + kdMin(k, ds), 0);
 function knownCustomers() {
   const m = new Map();
-  for (const mk in S.months) for (const dd in S.months[mk].days) for (const k of S.months[mk].days[dd].kunden || []) if (k.name) m.set(k.name, (m.get(k.name) || 0) + 1);
+  for (const mk in S.months) for (const dd in S.months[mk].days) for (const k of S.months[mk].days[dd].kunden || []) if (k.name && !isBetr(k)) m.set(k.name, (m.get(k.name) || 0) + 1);
   return [...m.entries()].sort((a, b) => b[1] - a[1]).map(x => x[0]);
 }
 function customerStats(mk) {
   const m = new Map();
   for (const ds of monthDays(mk)) {
     const r = getRec(ds);
-    for (const k of (r && r.kunden) || []) { const e = m.get(k.name) || { name: k.name, min: 0, n: 0 }; e.min += kdMin(k, ds); e.n++; m.set(k.name, e); }
+    for (const k of ((r && r.kunden) || []).filter(k => !isBetr(k))) { const e = m.get(k.name) || { name: k.name, min: 0, n: 0 }; e.min += kdMin(k, ds); e.n++; m.set(k.name, e); }
   }
   return [...m.values()].sort((a, b) => b.min - a.min);
 }
@@ -670,7 +681,7 @@ function calc(ds, rec) {
 
 function monthDays(mk) { const n = daysInMonth(mk), out = []; for (let i = 1; i <= n; i++) out.push(`${mk}-${pad(i)}`); return out; }
 function monthStats(mk) {
-  const t = { soll: 0, ist: 0, saldo: 0, worked: 0, brk: 0, urlaub: 0, krank: 0, pflege: 0, za: 0, arzt: 0, arztN: 0, km: 0, feiertag: 0, workdays: 0, sonder: 0, schule: 0, unbezahlt: 0, unfall: 0, krankMin: 0, kp: 0, kpN: 0 };
+  const t = { soll: 0, ist: 0, saldo: 0, worked: 0, brk: 0, urlaub: 0, krank: 0, pflege: 0, za: 0, arzt: 0, arztN: 0, km: 0, feiertag: 0, workdays: 0, sonder: 0, schule: 0, unbezahlt: 0, unfall: 0, krankMin: 0, kp: 0, kpN: 0, betr: 0 };
   for (const ds of monthDays(mk)) {
     const c = calc(ds);
     if (!c.counted) {
@@ -678,7 +689,7 @@ function monthStats(mk) {
       continue;
     }
     if (c.kind === "krank") t.krankMin += c.ist;
-    t.kp += c.kp; t.kpN += (c.rec.kp || []).length;
+    t.kp += c.kp; t.kpN += (c.rec.kp || []).length; t.betr += betrMin(c.rec, ds);
     t.soll += c.soll; t.ist += c.ist; t.saldo += c.saldo; t.worked += c.worked; t.brk += c.brk; t.arzt += c.arzt;
     t.arztN += (c.rec.abs || []).filter(a => a.type === "arzt").length;
     t.km += Number(c.rec.km) || 0;
@@ -784,9 +795,9 @@ function viewHeute() {
   const kd = r.kunden || [], kdRun = kd.findIndex(k => k.from && !k.to);
   const kundenCard = `<section class="card">
     <div class="row"><h2 style="margin:0">Kunden heute</h2>${kd.length ? `<span class="num" style="color:var(--muted);font-size:13px">${hm(kd.reduce((a, k) => a + kdMin(k, ds), 0))} h</span>` : ""}</div>
-    ${kd.length ? `<div class="list">${kd.map((k, i) => `<div class="li"><div class="kd-open" data-act="kdnote" data-i="${i}" role="button" tabindex="0"><b>${esc(k.name)}</b>${k.to ? "" : ' <span class="chip k-work">läuft</span>'}<small class="num">${esc(k.from)}–${esc(k.to || "jetzt")} · ${hm(kdMin(k, ds))} h${k.note ? " · " + esc(k.note) : ""}</small>${matOf(k.name) ? `<div class="mat">📦 ${esc(matOf(k.name)).replace(/\n/g, " · ")}</div>` : ""}</div><div class="kd-acts"><button class="btn ghost" data-act="kdnote" data-i="${i}" aria-label="Notiz zu ${esc(k.name)}">${ICON.pen}</button>${k.to ? "" : `<button class="btn primary" data-act="kdstop" data-i="${i}">Fertig</button>`}</div></div>`).join("")}</div>`
+    ${kd.length ? `<div class="list">${kd.map((k, i) => `<div class="li"><div class="kd-open" data-act="kdnote" data-i="${i}" role="button" tabindex="0"><b>${isBetr(k) ? "🏭 " : ""}${esc(k.name)}</b>${k.to ? "" : ' <span class="chip k-work">läuft</span>'}<small class="num">${esc(k.from)}–${esc(k.to || "jetzt")} · ${hm(kdMin(k, ds))} h${k.note ? " · " + esc(k.note) : ""}</small>${matOf(k.name) ? `<div class="mat">📦 ${esc(matOf(k.name)).replace(/\n/g, " · ")}</div>` : ""}</div><div class="kd-acts"><button class="btn ghost" data-act="kdnote" data-i="${i}" aria-label="Notiz zu ${esc(k.name)}">${ICON.pen}</button>${k.to ? "" : `<button class="btn primary" data-act="kdstop" data-i="${i}">Fertig</button>`}</div></div>`).join("")}</div>`
       : `<p class="hint" style="margin:8px 0 0">Tippe auf „Beim Kunden angekommen“, wenn du bei einer Kundschaft anfängst. Die Zeit läuft, bis du „Fertig“ tippst.</p>`}
-    <div class="btn-row" style="margin-top:12px">${kdRun < 0 ? `<button class="btn primary grow" data-act="kdstart" data-ds="${ds}">Beim Kunden angekommen</button>` : ""}<button class="btn grow" data-act="kdadd" data-ds="${ds}">+ Nachtragen</button></div>
+    <div class="btn-row" style="margin-top:12px">${kdRun < 0 || isBetr(kd[kdRun]) ? `<button class="btn primary grow" data-act="kdstart" data-ds="${ds}">Beim Kunden angekommen</button>` : ""}<button class="btn grow" data-act="kdadd" data-ds="${ds}">+ Nachtragen</button></div>
   </section>`;
   const absToday = (r.abs || []).map(a => `<span class="chip k-violet">${esc((PARTIAL[a.type] || {}).label || a.type)} ${esc(a.from)}–${esc(a.to)}</span>`).join(" ");
 
@@ -797,6 +808,8 @@ function viewHeute() {
     <div class="status ${stCls}"><i></i>${statusTxt}</div>
     ${big}${secondary}${kpBtn}
     <div class="stamps">${stamps}</div>
+    ${(() => { const bRun = (r.kunden || []).find(k => isBetr(k) && k.from && !k.to), bMin = betrMin(r, ds);
+      return `<button class="stamp-betr ${bRun ? "run" : bMin ? "set" : ""}" data-act="betrieb"><span>🏭 Betrieb</span><b>${bRun ? `seit ${esc(bRun.from)}` : bMin ? `${hm(bMin)} h heute` : "einstempeln"}</b><small>${bRun ? "Tippen zum Ausstempeln" : "Zeit in der Firma, z. B. Vorbereitung"}</small></button>`; })()}
     ${absToday || kpToday ? `<div class="btn-row">${absToday} ${kpToday}</div>` : ""}
   </section>
   ${warn}
@@ -867,6 +880,7 @@ function viewMonat() {
     <dl class="kv">
       <dt>Arbeitstage gestempelt</dt><dd>${t.workdays}</dd>
       <dt>Reine Arbeitszeit</dt><dd>${hm(t.worked)} h</dd>
+      ${t.betr ? `<dt>davon im Betrieb</dt><dd>${hm(t.betr)} h</dd>` : ""}
       <dt>Urlaub</dt><dd>${String(t.urlaub).replace(".", ",")} Tage</dd>
       <dt>Krankenstand</dt><dd>${t.krank} Tage</dd>
       ${t.unfall ? `<dt>Arbeitsunfall</dt><dd>${t.unfall} Tage</dd>` : ""}
@@ -938,7 +952,7 @@ function yearStats(year) {
     for (const ds of monthDays(mk)) {
       const c = calc(ds); if (!c.counted || !c.worked) continue;
       const o = ORTE[c.rec.ort || "betrieb"] || c.rec.ort; (orte[o] = orte[o] || { tage: 0, min: 0 }); orte[o].tage++; orte[o].min += c.worked;
-      for (const k of c.rec.kunden || []) { const kk = kunden[k.name] || (kunden[k.name] = { name: k.name, n: 0, min: 0, first: ds, last: ds }); kk.n++; kk.min += kdMin(k, ds); if (ds < kk.first) kk.first = ds; if (ds > kk.last) kk.last = ds; }
+      for (const k of (c.rec.kunden || []).filter(k => !isBetr(k))) { const kk = kunden[k.name] || (kunden[k.name] = { name: k.name, n: 0, min: 0, first: ds, last: ds }); kk.n++; kk.min += kdMin(k, ds); if (ds < kk.first) kk.first = ds; if (ds > kk.last) kk.last = ds; }
     }
   }
   return { y, months, orte: Object.entries(orte).sort((a, b) => b[1].min - a[1].min), kunden: Object.values(kunden).sort((a, b) => b.min - a.min) };
@@ -1340,7 +1354,7 @@ function buildNachweis(mk) {
     const c = calc(ds), r = c.rec, d = parseDs(ds), we = d.getDay() === 0 || d.getDay() === 6;
     const diff = c.counted && (c.saldo || c.ist) ? c.saldo : 0;
     return `<tr class="${we ? "we" : ""} ${c.kind !== "arbeit" ? "abs" : ""}"><td>${pad(d.getDate())}.${pad(d.getMonth() + 1)}.</td><td>${WD[d.getDay()]}</td><td>${esc(r.in || "")}</td><td>${esc(r.out || "")}</td>
-      <td>${h(c.brk + c.kp)}</td><td><b>${h(c.worked)}</b></td><td>${h(c.soll)}</td><td>${c.counted ? h(c.ist) : ""}</td><td class="${diff > 0 ? "plus" : diff < 0 ? "minus" : ""}">${sg(diff)}</td><td class="bem">${esc(dayRemark(c))}</td></tr>`;
+      <td>${h(c.brk + c.kp)}</td><td><b>${h(c.worked)}</b></td><td>${h(betrMin(r, ds))}</td><td>${h(c.soll)}</td><td>${c.counted ? h(c.ist) : ""}</td><td class="${diff > 0 ? "plus" : diff < 0 ? "minus" : ""}">${sg(diff)}</td><td class="bem">${esc(dayRemark(c))}</td></tr>`;
   }).join("");
   const ueRate = rateNum("ueber");
   const asOf = lastDayOf(mk) < `${mk}-${pad(daysInMonth(mk))}` ? `Stand ${fmtDate(Date.now())} (Monat läuft noch)` : "";
@@ -1349,9 +1363,9 @@ function buildNachweis(mk) {
     <p>${esc(s.name || "Name: ________________")}${s.persnr ? ` · Pers.-Nr. ${esc(s.persnr)}` : ""}${s.firma ? ` · ${esc(s.firma)}` : ""}</p></div>
     <p class="small">${asOf || `Erstellt am ${fmtDate(Date.now())}`}</p></div>
   <table class="nw-t">
-    <thead><tr><th>Datum</th><th>Tag</th><th>Beginn</th><th>Ende</th><th>Pause</th><th>Arbeitszeit</th><th>Soll</th><th>Ist</th><th>Über&shy;stunden</th><th>Bemerkung</th></tr></thead>
+    <thead><tr><th>Datum</th><th>Tag</th><th>Beginn</th><th>Ende</th><th>Pause</th><th>Arbeitszeit</th><th>Betrieb</th><th>Soll</th><th>Ist</th><th>Über&shy;stunden</th><th>Bemerkung</th></tr></thead>
     <tbody>${rows}</tbody>
-    <tfoot><tr><td colspan="4">Summe</td><td>${hm(t.brk + t.kp)}</td><td>${hm(t.worked)}</td><td>${hm(t.soll)}</td><td>${hm(t.ist)}</td><td class="${t.saldo >= 0 ? "plus" : "minus"}">${hmSigned(t.saldo)}</td><td></td></tr></tfoot>
+    <tfoot><tr><td colspan="4">Summe</td><td>${hm(t.brk + t.kp)}</td><td>${hm(t.worked)}</td><td>${hm(t.betr)}</td><td>${hm(t.soll)}</td><td>${hm(t.ist)}</td><td class="${t.saldo >= 0 ? "plus" : "minus"}">${hmSigned(t.saldo)}</td><td></td></tr></tfoot>
   </table>
   <div class="nw-bottom"><div class="nw-sum">
     <table>
@@ -1407,18 +1421,18 @@ function buildCsv(mk) {
   L(["Erstellt am", new Date().toLocaleString("de-AT")]);
   L([]);
   // Die ersten Spalten sind das, was der Chef braucht; Details folgen dahinter
-  L(["Datum", "Wochentag", "Beginn", "Ende", "Pause (h)", "Arbeitszeit (h)", "Soll (h)", "Ist (h)", "Überstunden (h)", "Bemerkung",
+  L(["Datum", "Wochentag", "Beginn", "Ende", "Pause (h)", "Arbeitszeit (h)", "Soll (h)", "Ist (h)", "Überstunden (h)", "Betrieb (h)", "Bemerkung",
     "Mittag Anfang", "Mittag Ende", "Kaffeepause (Min.)", "Arbeitsort", "Stundenweise Abwesenheit", "Beleg", "Kilometer", "Projekt / Kostenstelle", "Kunden", "Kunden (h)", "Notiz"]);
   for (const ds of monthDays(mk)) {
     const c = calc(ds), r = c.rec, d = parseDs(ds), cnt = c.counted;
     const absTxt = (r.abs || []).map(a => `${(PARTIAL[a.type] || {}).label || a.type} ${a.from}-${a.to}`).join(", ");
     L([`${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`, WD_LONG[d.getDay()], r.in || "", r.out || "", (c.brk + c.kp) ? dec(c.brk + c.kp) : "", c.worked ? dec(c.worked) : "",
-      dec(c.soll), cnt ? dec(c.ist) : "", cnt && (c.saldo || c.ist) ? dec(c.saldo) : "", dayRemark(c),
+      dec(c.soll), cnt ? dec(c.ist) : "", cnt && (c.saldo || c.ist) ? dec(c.saldo) : "", betrMin(r, ds) ? dec(betrMin(r, ds)) : "", dayRemark(c),
       r.ls || "", r.le || "", c.kp || "", r.in ? (ORTE[r.ort || "betrieb"] || r.ort) : "", absTxt, r.beleg ? "ja" : "", r.km ? String(r.km).replace(".", ",") : "", r.projekt || "",
       (r.kunden || []).map(k => `${k.name} ${k.from}-${k.to || ""}`).join(", "), (r.kunden || []).length ? dec((r.kunden || []).reduce((a, k) => a + kdMin(k, ds), 0)) : "", r.note || ""]);
   }
   const ub = monthCarry(mk);
-  L(["Summe", "", "", "", dec(t.brk + t.kp), dec(t.worked), dec(t.soll), dec(t.ist), dec(t.saldo), ""]);
+  L(["Summe", "", "", "", dec(t.brk + t.kp), dec(t.worked), dec(t.soll), dec(t.ist), dec(t.saldo), dec(t.betr), ""]);
   L([]);
   L(["Überstunden"]); L(["Übertrag Vormonat (h)", dec(ub)]); L(["Überstunden dieser Monat (h)", dec(t.saldo)]); L(["Zeitkonto Monatsende (h)", dec(ub + t.saldo)]);
   L([]);
@@ -1535,6 +1549,23 @@ document.addEventListener("click", async e => {
     case "kprowadd": readDraftInputs(); draft.rec.kp.push({ at: "", min: kpDefault() }); renderEditor(); break;
     case "kprowdel": readDraftInputs(); draft.rec.kp.splice(+el.dataset.i, 1); renderEditor(); break;
     case "kdnote": openKdNote(+el.dataset.i); break;
+    case "betrieb": {
+      const ds = todayDs(), prev = getRec(ds), r = clone(prev || { kind: holidayName(ds) ? "feiertag" : "arbeit" }), now = nowHM();
+      r.kunden = r.kunden || [];
+      const run = r.kunden.find(k => k.from && !k.to);
+      const endAt = k => { k.to = now; if (k.to === k.from) k.to = pad(Math.floor(((toMin(k.from) + 1) % 1440) / 60)) + ":" + pad((toMin(k.from) + 1) % 60); };
+      let msg;
+      if (run && isBetr(run)) { endAt(run); msg = `Betrieb ${run.from}–${run.to} ausgestempelt`; }
+      else {
+        if (run) endAt(run);
+        r.kunden.push({ name: BETRIEB, from: now }); r.kunden.sort((a, b) => a.from.localeCompare(b.from));
+        if (!r.in) r.in = now;
+        msg = `Im Betrieb ab ${now}${run ? ` · ${run.name} beendet` : ""}${!prev || !prev.in ? " · Arbeitsbeginn gestempelt" : ""}`;
+      }
+      lastUndo = { ds, prev: prev ? clone(prev) : null };
+      setRec(ds, r); try { navigator.vibrate && navigator.vibrate(30); } catch (x) {}
+      toast(msg, true); render(); break;
+    }
     case "nachweis": openNachweis(viewMonth); break;
     case "nwclose": closeNachweis(); break;
     case "nwprint": try { window.print(); } catch (x) { toast("Drucken geht hier nicht. Tippe auf „Datei“."); } break;
@@ -1620,6 +1651,8 @@ document.addEventListener("submit", e => {
     if (mode === "add" && (!to || to === from)) return fail("Bitte eine Bis-Zeit eintragen, die sich von der Von-Zeit unterscheidet.");
     const r = clone(getRec(ds) || { kind: holidayName(ds) ? "feiertag" : "arbeit" });
     const k = { name, from }; if (to) k.to = to; const note = $("k-note").value.trim(); if (note) k.note = note;
+    // Beim Start endet ein laufender Einsatz (z. B. Betrieb) zur Ankunftszeit
+    if (mode === "start") for (const x of r.kunden || []) if (x.from && !x.to) x.to = toMin(from) > toMin(x.from) ? from : pad(Math.floor(((toMin(x.from) + 1) % 1440) / 60)) + ":" + pad((toMin(x.from) + 1) % 60);
     r.kunden = (r.kunden || []).concat(k).sort((a, b) => a.from.localeCompare(b.from));
     lastUndo = { ds, prev: getRec(ds) ? clone(getRec(ds)) : null };
     setRec(ds, r); closeSheet();
