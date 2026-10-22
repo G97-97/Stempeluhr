@@ -196,6 +196,7 @@ button { cursor: pointer; }
 #print-root { position: fixed; inset: 0; z-index: 60; overflow: auto; background: var(--bg); padding: 12px 12px 40px; }
 .pr-bar { position: sticky; top: 0; display: flex; gap: 8px; padding: 8px 0; background: var(--bg); z-index: 1; }
 .pr-hint { font-size: 13px; color: var(--muted); margin: 0 0 10px; }
+.linkbtn { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; font-weight: 600; text-decoration: underline; }
 .pr-page { background: #fff; color: #111; border-radius: 8px; padding: 14px; overflow-x: auto; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
 body.printing { overflow: hidden; }
 @media print {
@@ -795,7 +796,8 @@ function viewMonat() {
     </dl>
     <button class="btn primary" style="width:100%;margin-top:14px" data-act="nachweis">${ICON.dl} Stundennachweis für den Chef (PDF)</button>
     <div class="btn-row" style="margin-top:8px">
-      <button class="btn grow" data-act="csv">CSV für Excel</button>
+      <button class="btn grow" data-act="xlsx">${ICON.dl} Excel-Datei</button>
+      <button class="btn grow" data-act="csv">CSV</button>
       <button class="btn grow" data-act="report">${ICON.copy} Bericht als Text</button>
     </div>
   </section>
@@ -1297,8 +1299,8 @@ const NW_CSS = `.nw{font:10.5pt/1.35 system-ui,Arial,sans-serif;color:#111;backg
 .nw-sign{display:grid;gap:30px;padding-bottom:2px}.nw-sign div{border-top:1px solid #111;padding-top:3px;font-size:8.5pt;color:#555}`;
 function openNachweis(mk) {
   const root = $("print-root");
-  root.innerHTML = `<div class="pr-bar"><button class="btn primary grow" data-act="nwprint">${ICON.dl} Drucken / als PDF</button><button class="btn" data-act="nwfile">Datei</button><button class="btn" data-act="nwclose" aria-label="Schließen">${ICON.x}</button></div>
-    <p class="pr-hint">Im Druckfenster „Als PDF speichern“ wählen, dann kannst du die Datei dem Chef schicken. Querformat passt am besten.</p>
+  root.innerHTML = `<div class="pr-bar"><button class="btn primary grow" data-act="nwpng">Als Bild teilen</button><button class="btn grow" data-act="nwprint">PDF</button><button class="btn" data-act="nwclose" aria-label="Schließen">${ICON.x}</button></div>
+    <p class="pr-hint"><b>Als Bild teilen:</b> öffnet das Teilen-Menü, z. B. direkt WhatsApp. <b>PDF:</b> im Druckfenster „Als PDF speichern“ wählen. Klappt beides nicht, <button class="linkbtn" data-act="nwfile">Datei speichern</button>.</p>
     <div class="pr-page">${buildNachweis(mk)}</div>`;
   root.hidden = false; document.body.classList.add("printing"); root.scrollTop = 0;
 }
@@ -1307,6 +1309,170 @@ function closeNachweis() { const r = $("print-root"); r.hidden = true; r.innerHT
 function nachweisFile(mk) {
   return `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Stundennachweis ${esc(monthName(mk, S.settings.region))}</title>
 <style>@page{size:A4 landscape;margin:10mm}body{margin:0;padding:12px;background:#fff}${NW_CSS}</style></head><body>${buildNachweis(mk)}</body></html>`;
+}
+
+/* ---------- Stundennachweis als Bild (PNG) zum Weiterschicken ---------- */
+function nachweisPng(mk) {
+  const s = S.settings, t = monthStats(mk), ub = monthCarry(mk), days = monthDays(mk);
+  const W = 1500, RH = 34, top = 130, headH = 42, sumH = 300;
+  const H = top + headH + days.length * RH + RH + sumH;
+  const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+  const g = cv.getContext("2d"), F = (w, px) => `${w} ${px}px Arial, "Helvetica Neue", sans-serif`;
+  g.fillStyle = "#fff"; g.fillRect(0, 0, W, H); g.textBaseline = "middle";
+  const GREEN = "#0E6B57", RED = "#B3261E", GRAY = "#555";
+  g.fillStyle = "#111"; g.font = F(700, 38); g.fillText(`Stundennachweis ${monthName(mk, s.region)}`, 40, 52);
+  g.font = F(400, 24); g.fillStyle = GRAY;
+  g.fillText([s.name || "Name: ______________", s.persnr ? "Pers.-Nr. " + s.persnr : "", s.firma].filter(Boolean).join("  ·  "), 40, 96);
+  const asOf = lastDayOf(mk) < `${mk}-${pad(daysInMonth(mk))}` ? `Stand ${fmtDate(Date.now())} (Monat läuft noch)` : `Erstellt am ${fmtDate(Date.now())}`;
+  g.textAlign = "right"; g.fillText(asOf, W - 40, 96); g.textAlign = "left";
+  g.fillStyle = GREEN; g.fillRect(40, 116, W - 80, 4);
+  const cols = [["Datum", 40, "l"], ["Tag", 150, "l"], ["Beginn", 290, "r"], ["Ende", 390, "r"], ["Pause", 490, "r"], ["Arbeit", 610, "r"], ["Betrieb", 730, "r"], ["Soll", 840, "r"], ["Ist", 950, "r"], ["Überstd.", 1090, "r"], ["Bemerkung", 1120, "l"]];
+  const cell = (txt, i, y, color = "#111", w = 400) => { const [, x, a] = cols[i]; g.textAlign = a === "r" ? "right" : "left"; g.fillStyle = color; g.fillText(txt, x, y); };
+  let y = top; g.fillStyle = GREEN; g.fillRect(40, y, W - 80, headH); g.font = F(700, 21);
+  cols.forEach((c, i) => cell(c[0], i, y + headH / 2, "#fff")); y += headH;
+  for (const ds of days) {
+    const c = calc(ds), r = c.rec, d = parseDs(ds), we = d.getDay() === 0 || d.getDay() === 6;
+    if (we) { g.fillStyle = "#F0F0F0"; g.fillRect(40, y, W - 80, RH); }
+    g.fillStyle = "#DDD"; g.fillRect(40, y + RH - 1, W - 80, 1);
+    const m = y + RH / 2, diff = c.counted && (c.saldo || c.ist) ? c.saldo : 0, b = betrMin(r, ds);
+    g.font = F(400, 21);
+    cell(`${pad(d.getDate())}.${pad(d.getMonth() + 1)}.`, 0, m); cell(WD[d.getDay()], 1, m); cell(r.in || "", 2, m); cell(r.out || "", 3, m);
+    cell(c.brk + c.kp ? hm(c.brk + c.kp) : "", 4, m); g.font = F(700, 21); cell(c.worked ? hm(c.worked) : "", 5, m); g.font = F(400, 21);
+    cell(b ? hm(b) : "", 6, m); cell(c.soll ? hm(c.soll) : "", 7, m); cell(c.counted && c.ist ? hm(c.ist) : "", 8, m);
+    if (diff) { g.font = F(700, 21); cell(hmSigned(diff), 9, m, diff > 0 ? GREEN : RED); }
+    const rem = dayRemark(c); if (rem) { g.font = F(c.kind !== "arbeit" ? 700 : 400, 18); let tx = rem; while (g.measureText(tx).width > W - 40 - 1120 && tx.length > 3) tx = tx.slice(0, -2); cell(tx === rem ? rem : tx + "…", 10, m, c.kind !== "arbeit" ? GREEN : GRAY); }
+    y += RH;
+  }
+  g.fillStyle = "#111"; g.fillRect(40, y, W - 80, 3); const m = y + RH / 2 + 2; g.font = F(700, 22);
+  cell("Summe", 0, m); cell(hm(t.brk + t.kp), 4, m); cell(hm(t.worked), 5, m); cell(t.betr ? hm(t.betr) : "", 6, m); cell(hm(t.soll), 7, m); cell(hm(t.ist), 8, m); cell(hmSigned(t.saldo), 9, m, t.saldo >= 0 ? GREEN : RED);
+  y += RH + 24;
+  const line = (label, a, bb, big) => { g.font = F(big ? 800 : 400, big ? 28 : 22); g.textAlign = "left"; g.fillStyle = "#111"; g.fillText(label, 40, y); g.textAlign = "right"; g.fillText(a, 760, y); g.fillStyle = GRAY; g.font = F(400, big ? 26 : 22); g.fillText(bb, 900, y); y += big ? 44 : 34; };
+  line("Soll-Stunden", hm(t.soll) + " h", dec(t.soll) + " h");
+  line("Ist-Stunden (inkl. Urlaub, Krankenstand, Feiertag)", hm(t.ist) + " h", dec(t.ist) + " h");
+  line(t.saldo >= 0 ? "Überstunden in diesem Monat" : "Minusstunden in diesem Monat", hmSigned(t.saldo) + " h", dec(t.saldo) + " h", true);
+  const ueRate = rateNum("ueber"); if (ueRate && t.saldo > 0) line(`Auszahlung bei ${eur(ueRate)} pro Überstunde (brutto)`, eur(Math.round(t.saldo / 60 * ueRate * 100) / 100), "");
+  line("Übertrag aus Vormonat", hmSigned(ub) + " h", dec(ub) + " h");
+  line("Zeitkonto am Monatsende", hmSigned(ub + t.saldo) + " h", dec(ub + t.saldo) + " h");
+  g.textAlign = "left"; g.font = F(400, 19); g.fillStyle = GRAY;
+  g.fillText(`Urlaub ${String(t.urlaub).replace(".", ",")} Tage · Krankenstand ${t.krank} Tage · Arztbesuche ${hm(t.arzt)} h${t.kpN ? ` · Kaffeepausen ${t.kpN}×` : ""}`, 40, y + 4);
+  return new Promise(res => cv.toBlob(b => res(b), "image/png"));
+}
+async function shareOrSave(filename, blob, title) {
+  try {
+    const f = new File([blob], filename, { type: blob.type });
+    if (navigator.canShare && navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], title }); return; }
+  } catch (e) { if (e && e.name === "AbortError") return; }
+  if (window.STEMPELUHR_OFFLINE) {
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = filename; document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000); toast("Bild wird in Downloads gespeichert."); return;
+  }
+  await offerFile(filename, new Uint8Array(await blob.arrayBuffer()));
+}
+
+/* ---------- Excel (.xlsx) ohne Zusatzbibliothek ---------- */
+// Eine .xlsx ist ein ZIP mit XML-Dateien. Gespeichert wird unkomprimiert, das kann jeder Excel-Leser öffnen.
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(b) { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC_T[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function zipStore(files) {
+  const enc = new TextEncoder(), parts = [], central = []; let off = 0;
+  const u16 = v => [v & 255, (v >>> 8) & 255], u32 = v => [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255];
+  for (const [name, text] of files) {
+    const nb = enc.encode(name), db = enc.encode(text), crc = crc32(db);
+    const head = [0x50, 0x4B, 3, 4, ...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21), ...u32(crc), ...u32(db.length), ...u32(db.length), ...u16(nb.length), ...u16(0)];
+    parts.push(new Uint8Array(head), nb, db);
+    central.push(new Uint8Array([0x50, 0x4B, 1, 2, ...u16(20), ...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21), ...u32(crc), ...u32(db.length), ...u32(db.length), ...u16(nb.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(off)]), nb);
+    off += head.length + nb.length + db.length;
+  }
+  const cLen = central.reduce((a, x) => a + x.length, 0);
+  const end = new Uint8Array([0x50, 0x4B, 5, 6, ...u16(0), ...u16(0), ...u16(files.length), ...u16(files.length), ...u32(cLen), ...u32(off), ...u16(0)]);
+  const all = [...parts, ...central, end], out = new Uint8Array(all.reduce((a, x) => a + x.length, 0)); let p = 0;
+  for (const x of all) { out.set(x, p); p += x.length; }
+  return out;
+}
+const xe = v => String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
+const colL = i => { let s = ""; i++; while (i) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; };
+// Zellen: null = leer; string = Text; {n, s} = Zahl mit Stil; {f, v, s} = Formel; {t, s} = Text mit Stil
+function sheetXml(rows, widths, freeze) {
+  const body = rows.map((r, ri) => `<row r="${ri + 1}">${(r || []).map((c, ci) => {
+    if (c == null || c === "") return "";
+    const ref = colL(ci) + (ri + 1);
+    if (typeof c === "string") return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${xe(c)}</t></is></c>`;
+    if (c.t != null) return `<c r="${ref}" s="${c.s || 0}" t="inlineStr"><is><t xml:space="preserve">${xe(c.t)}</t></is></c>`;
+    if (c.f) return `<c r="${ref}" s="${c.s || 0}"><f>${xe(c.f)}</f><v>${c.v}</v></c>`;
+    return `<c r="${ref}" s="${c.s || 0}"><v>${c.n}</v></c>`;
+  }).join("")}</row>`).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetViews><sheetView workbookViewId="0">${freeze ? `<pane ySplit="${freeze}" topLeftCell="A${freeze + 1}" activePane="bottomLeft" state="frozen"/>` : ""}</sheetView></sheetViews>
+<cols>${widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join("")}</cols><sheetData>${body}</sheetData>
+<pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/></worksheet>`;
+}
+// Stile: 1 Kopfzeile, 2 Uhrzeit, 3 Stunden 0,00, 4 Summe fett 0,00, 5 Text fett, 6 Titel, 7 Überstunden fett 0,00, 8 Wochenende grau
+const XLSX_STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<numFmts count="1"><numFmt numFmtId="164" formatCode="+0.00;-0.00;0.00"/></numFmts>
+<fonts count="4"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="15"/><name val="Calibri"/></font></fonts>
+<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0E6B57"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF0F0F0"/></patternFill></fill></fills>
+<borders count="2"><border/><border><top style="medium"/></border></borders>
+<cellStyleXfs count="1"><xf/></cellStyleXfs>
+<cellXfs count="9"><xf/>
+<xf fontId="1" fillId="2" applyFont="1" applyFill="1"><alignment wrapText="1" vertical="center"/></xf>
+<xf numFmtId="20" applyNumberFormat="1"/>
+<xf numFmtId="2" applyNumberFormat="1"/>
+<xf numFmtId="2" fontId="2" borderId="1" applyNumberFormat="1" applyFont="1" applyBorder="1"/>
+<xf fontId="2" applyFont="1"/>
+<xf fontId="3" applyFont="1"/>
+<xf numFmtId="164" fontId="2" applyNumberFormat="1" applyFont="1"/>
+<xf fillId="3" applyFill="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+function buildXlsx(mk) {
+  const s = S.settings, t = monthStats(mk), ub = monthCarry(mk), H = m => Math.round(m / 60 * 100) / 100;
+  const tm = hhmm => { const m = toMin(hhmm); return m == null ? null : { n: m / 1440, s: 2 }; };
+  const num = (m, st = 3) => m ? { n: H(m), s: st } : null;
+  const rows = [
+    [{ t: `Stundennachweis ${monthName(mk, s.region)}`, s: 6 }],
+    [[s.name, s.persnr ? "Pers.-Nr. " + s.persnr : "", s.firma].filter(Boolean).join(" · ") || "Name:"],
+    [],
+    ["Datum", "Tag", "Beginn", "Ende", "Pause (h)", "Arbeitszeit (h)", "Betrieb (h)", "Soll (h)", "Ist (h)", "Überstunden (h)", "Bemerkung", "Kunden", "Notiz"].map(x => ({ t: x, s: 1 }))
+  ];
+  const first = rows.length + 1;
+  for (const ds of monthDays(mk)) {
+    const c = calc(ds), r = c.rec, d = parseDs(ds), we = d.getDay() === 0 || d.getDay() === 6;
+    const diff = c.counted && (c.saldo || c.ist) ? c.saldo : 0;
+    rows.push([{ t: `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`, s: we ? 8 : 0 }, { t: WD[d.getDay()], s: we ? 8 : 0 }, tm(r.in), tm(r.out), num(c.brk + c.kp), num(c.worked), num(betrMin(r, ds)),
+      c.soll ? { n: H(c.soll), s: 3 } : null, c.counted && c.ist ? { n: H(c.ist), s: 3 } : null, diff ? { n: H(diff), s: 7 } : null, dayRemark(c),
+      (r.kunden || []).map(k => `${k.name} ${k.from}–${k.to || ""}`).join(", "), r.note || ""]);
+  }
+  const last = rows.length, sum = (col, m, st = 4) => ({ f: `SUM(${col}${first}:${col}${last})`, v: H(m), s: st });
+  rows.push([{ t: "Summe", s: 5 }, null, null, null, sum("E", t.brk + t.kp), sum("F", t.worked), sum("G", t.betr), sum("H", t.soll), sum("I", t.ist), sum("J", t.saldo, 7)]);
+  rows.push([]);
+  const sumRow = rows.length - 1;
+  rows.push([{ t: t.saldo >= 0 ? "Überstunden dieser Monat" : "Minusstunden dieser Monat", s: 5 }, null, null, null, null, { f: `J${sumRow}`, v: H(t.saldo), s: 7 }]);
+  rows.push(["Übertrag Vormonat", null, null, null, null, { n: H(ub), s: 3 }]);
+  rows.push([{ t: "Zeitkonto Monatsende", s: 5 }, null, null, null, null, { f: `F${rows.length - 1}+F${rows.length}`, v: H(ub + t.saldo), s: 7 }]);
+  const ueRate = rateNum("ueber");
+  if (ueRate && t.saldo > 0) rows.push([`Auszahlung Überstunden (brutto, ${dec2(ueRate)} € pro Stunde)`, null, null, null, null, { f: `ROUND(F${rows.length - 2}*${ueRate},2)`, v: Math.round(H(t.saldo) * ueRate * 100) / 100, s: 4 }]);
+  rows.push(["Urlaub (Tage)", null, null, null, null, { n: t.urlaub, s: 0 }], ["Krankenstand (Tage)", null, null, null, null, { n: t.krank, s: 0 }], ["Arztbesuche (h)", null, null, null, null, { n: H(t.arzt), s: 3 }]);
+  rows.push([], [], ["Datum, Unterschrift Mitarbeiter", null, null, null, null, null, null, "Datum, Unterschrift Arbeitgeber"]);
+  const sheets = [["Stundennachweis", sheetXml(rows, [12, 5, 8, 8, 9, 13, 10, 8, 8, 14, 28, 36, 30], 4)]];
+  // zweites Blatt: Kundeneinsätze und Material
+  const kr = [[{ t: `Kundeneinsätze ${monthName(mk, s.region)}`, s: 6 }], [], ["Datum", "Tag", "Kunde", "Von", "Bis", "Dauer (h)", "Notiz"].map(x => ({ t: x, s: 1 }))];
+  const kFirst = kr.length + 1;
+  for (const ds of monthDays(mk)) { const r = getRec(ds), d = parseDs(ds); for (const k of (r && r.kunden) || []) kr.push([`${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`, WD[d.getDay()], k.name, tm(k.from), tm(k.to), { n: H(kdMin(k, ds)), s: 3 }, k.note || ""]); }
+  if (kr.length >= kFirst) {
+    kr.push([{ t: "Summe", s: 5 }, null, null, null, null, { f: `SUM(F${kFirst}:F${kr.length})`, v: H(customerStats(mk).reduce((a, e) => a + e.min, 0) + t.betr), s: 4 }]);
+    kr.push([], [{ t: "Je Kunde", s: 5 }], ["Kunde", "Einsätze", "Stunden (h)"].map(x => ({ t: x, s: 1 })));
+    for (const e of customerStats(mk)) kr.push([e.name, { n: e.n, s: 0 }, { n: H(e.min), s: 3 }]);
+    const mats = customerStats(mk).filter(e => matOf(e.name));
+    if (mats.length) { kr.push([], [{ t: "Material fürs nächste Mal", s: 5 }]); for (const e of mats) for (const x of matOf(e.name).split("\n")) kr.push([e.name, x]); }
+    sheets.push(["Kunden", sheetXml(kr, [12, 5, 24, 8, 8, 10, 40], 3)]);
+  }
+  const files = [
+    ["[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>`],
+    ["_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
+    ["xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map(([n], i) => `<sheet name="${xe(n)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets><calcPr calcId="0" fullCalcOnLoad="1"/></workbook>`],
+    ["xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join("")}<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],
+    ["xl/styles.xml", XLSX_STYLES],
+    ...sheets.map(([, x], i) => [`xl/worksheets/sheet${i + 1}.xml`, x]),
+  ];
+  return zipStore(files);
 }
 
 /* ---------- Export ---------- */
@@ -1377,11 +1543,12 @@ function buildReport(mk) {
   return lines.filter((x, i, a) => !(x === "" && a[i - 1] === "")).join("\n");
 }
 async function offerFile(filename, data) {
-  const mime = filename.endsWith(".csv") ? "text/csv" : filename.endsWith(".html") ? "text/html" : "application/json";
-  if (window.AndroidBridge) { AndroidBridge.saveFile(filename, mime, data); return; }
+  const bin = data instanceof Uint8Array;
+  const mime = filename.endsWith(".png") ? "image/png" : filename.endsWith(".xlsx") ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : filename.endsWith(".csv") ? "text/csv" : filename.endsWith(".html") ? "text/html" : "application/json";
+  if (window.AndroidBridge) { if (bin) { toast("Excel-Datei geht in dieser App-Version nicht. Bitte die Web-App verwenden."); return; } AndroidBridge.saveFile(filename, mime, data); return; }
   if (window.STEMPELUHR_OFFLINE) {
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([data], { type: mime + ";charset=utf-8" }));
+    a.href = URL.createObjectURL(new Blob([data], { type: bin ? mime : mime + ";charset=utf-8" }));
     a.download = filename; document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
     toast("Datei wird in Downloads gespeichert."); return;
@@ -1392,6 +1559,7 @@ async function offerFile(filename, data) {
     try { await dl.save({ filename, data }); toast("Datei gespeichert."); return; }
     catch (e) { if (e && e.code === "declined") return; if (e && e.code === "rate_limited") { toast("Bitte kurz warten und nochmal tippen."); return; } }
   }
+  if (bin) { toast("Herunterladen ist hier nicht möglich."); return; }
   showText(filename, data.replace(/^﻿/, ""), "Herunterladen ist hier nicht möglich. Kopiere den Inhalt und füge ihn in Excel oder eine E-Mail ein.");
 }
 function showText(title, text, sub) {
@@ -1465,7 +1633,9 @@ document.addEventListener("click", async e => {
       toast(msg, true); render(); break;
     }
     case "nachweis": openNachweis(viewMonth); break;
+    case "xlsx": { const n = (S.settings.name || "").replace(/[^\wÄÖÜäöüß -]/g, "").trim().replace(/\s+/g, "_"); await offerFile(`Stundennachweis_${n ? n + "_" : ""}${viewMonth}.xlsx`, buildXlsx(viewMonth)); break; }
     case "nwclose": closeNachweis(); break;
+    case "nwpng": { const n = (S.settings.name || "").replace(/[^\wÄÖÜäöüß -]/g, "").trim().replace(/\s+/g, "_"); await shareOrSave(`Stundennachweis_${n ? n + "_" : ""}${viewMonth}.png`, await nachweisPng(viewMonth), `Stundennachweis ${monthName(viewMonth, S.settings.region)}`); break; }
     case "nwprint": try { window.print(); } catch (x) { toast("Drucken geht hier nicht. Tippe auf „Datei“."); } break;
     case "nwfile": await offerFile(`Stundennachweis_${(S.settings.name || "").replace(/[^\wÄÖÜäöüß -]/g, "").trim().replace(/\s+/g, "_") || "Mitarbeiter"}_${viewMonth}.html`, nachweisFile(viewMonth)); break;
     case "kddel": {
