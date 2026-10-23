@@ -166,6 +166,8 @@ button { cursor: pointer; }
 .week-soll { display: grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap: 4px; }
 .week-soll .field input { padding: 8px 2px; font-size: 13px; text-align: center; min-height: 42px; }
 .week-soll .field label { text-align: center; }
+.wt-day { justify-items: center; align-items: center; gap: 4px; font-size: 13px; }
+.wt-day input { width: 22px; height: 22px; min-height: 0; accent-color: var(--accent, #2563eb); }
 .check { display: flex; align-items: center; gap: 10px; min-height: 44px; font-weight: 500; }
 .check input { width: 22px; height: 22px; accent-color: var(--accent); }
 .form { display: grid; gap: 12px; }
@@ -373,6 +375,7 @@ const LS_KEY = "stempeluhr.v1";
 const defaultSettings = () => ({
   name: "", persnr: "", firma: "", region: "AT",
   soll: [480, 480, 480, 480, 390, 0, 0], // Mo..So in Minuten
+  modell: "tage", wochenMin: 1800, wochenTage: [1, 1, 1, 1, 1, 0, 0], // modell "woche": Wochenstunden flexibel
   urlaubTage: 25, urlaubRest: 0, startSaldo: 0, startDate: todayDs(), pauseHinweis: true, kpMin: 10, kpAbzug: true, updatedAt: 0,
 });
 let S = { settings: defaultSettings(), months: {} };
@@ -584,7 +587,19 @@ const kpSum = r => (r.kp || []).reduce((a, k) => a + (Number(k.min) || 0), 0);
 function sollBase(ds) {
   if (holidayName(ds)) return 0;
   const wd = (parseDs(ds).getDay() + 6) % 7;
-  return S.settings.soll[wd] || 0;
+  return sollWoche()[wd] || 0;
+}
+const isFlex = () => S.settings.modell === "woche";
+const flexNote = () => { if (!isFlex()) return ""; const d = sollWoche().filter(Boolean); return `Flexible Arbeitszeit: ${hm(S.settings.wochenMin || 0)} Std./Woche ohne fixe Zeiten (Ø ${hm(d.length ? Math.round(S.settings.wochenMin / d.length) : 0)} pro Arbeitstag). Überstunden ergeben sich aus der Monatssumme, die Tagesdifferenz ist nur zur Info.`; };
+const diffHead = () => isFlex() ? "Differenz" : "Überstunden";
+/* Flexibel: Wochenstunden gleichmäßig auf die gewählten Tage verteilt (Restminuten auf die ersten Tage). */
+function sollWoche() {
+  const s = S.settings;
+  if (!isFlex()) return s.soll;
+  const days = (s.wochenTage || []).map(Boolean), n = days.filter(Boolean).length, w = Math.max(0, Math.round(Number(s.wochenMin) || 0));
+  if (!n) return [0, 0, 0, 0, 0, 0, 0];
+  let rest = w % n;
+  return days.map(on => on ? Math.floor(w / n) + (rest-- > 0 ? 1 : 0) : 0);
 }
 function overlap(a1, a2, b1, b2) { return Math.max(0, Math.min(a2, b2) - Math.max(a1, b1)); }
 
@@ -777,7 +792,7 @@ function viewHeute() {
       <div class="btn-row" style="margin-top:12px"><button class="btn primary grow" data-act="closedcsv">${ICON.dl} CSV sichern</button><button class="btn grow" data-act="closedok">OK</button></div></section>`; })()}
   ${kundenCard}
   <section class="tiles">
-    <div class="tile"><span>Arbeitszeit heute</span><b>${hm(c.worked + c.paidAbs - c.unpaid)}</b><small>Soll ${hm(c.soll)}</small></div>
+    <div class="tile"><span>Arbeitszeit heute</span><b>${hm(c.worked + c.paidAbs - c.unpaid)}</b><small>${isFlex() ? "flexibel, Ø" : "Soll"} ${hm(c.soll)}</small></div>
     <div class="tile"><span>Pause heute</span><b>${hm(c.brk + c.kp)}</b><small>${c.kp ? `davon Kaffee ${c.kp} Min.` : c.brk >= 30 || c.worked <= 360 ? "in Ordnung" : "unter 30 Min."}</small></div>
     <div class="tile"><span>Diese Woche</span><b>${hm(wIst)}</b><small>von ${hm(wSoll)} Soll</small></div>
     <div class="tile"><span>Zeitkonto gesamt</span><b class="${saldo >= 0 ? "pos" : "neg"}">${hmSigned(saldo)}</b><small>${c.state === "work" || c.state === "pause" ? "ohne laufenden Tag" : "Gleitzeit-Saldo"}</small></div>
@@ -886,6 +901,7 @@ function showKdMat() {
   const t = matOf(n.value); box.hidden = !t; box.innerHTML = t ? `<b>📦 Material für ${esc(kLabel(resolveKunde(n.value)))}:</b><br>${esc(t).replace(/\n/g, "<br>")}` : "";
 }
 document.addEventListener("input", e => {
+  if (e.target.id === "p-modell") { $("p-tage").hidden = e.target.value === "woche"; $("p-woche").hidden = e.target.value !== "woche"; }
   if (e.target.id === "k-name") showKdMat();
   if (e.target.id === "ks-q") { const v = e.target.value, pos = e.target.selectionStart; openKstamm(v); const q = $("ks-q"); q.focus(); q.setSelectionRange(pos, pos); }
 });
@@ -1050,7 +1066,7 @@ function viewAbw() {
 /* ---------- Ansicht: Profil ---------- */
 function viewProfil() {
   const s = S.settings, names = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
-  const week = s.soll.reduce((a, b) => a + b, 0);
+  const week = s.soll.reduce((a, b) => a + b, 0), flex = isFlex(), wt = s.wochenTage || [1, 1, 1, 1, 1, 0, 0];
   return `
   <section class="card">
     <h2>Mitarbeiter</h2>
@@ -1060,8 +1076,18 @@ function viewProfil() {
         <div class="field"><label for="p-persnr">Personalnummer</label><input id="p-persnr" value="${esc(s.persnr)}"></div>
         <div class="field"><label for="p-firma">Firma / Abteilung</label><input id="p-firma" value="${esc(s.firma)}"></div>
       </div>
-      <div class="lbl">Sollarbeitszeit pro Tag (Woche: ${hm(week)} h)</div>
-      <div class="week-soll">${names.map((n, i) => `<div class="field"><label for="p-soll${i}">${n}</label><input type="time" id="p-soll${i}" value="${pad(Math.floor(s.soll[i] / 60))}:${pad(s.soll[i] % 60)}"></div>`).join("")}</div>
+      <div class="field"><label for="p-modell">Arbeitszeitmodell</label>
+        <select id="p-modell"><option value="tage" ${!flex ? "selected" : ""}>Feste Stunden pro Wochentag</option><option value="woche" ${flex ? "selected" : ""}>Wochenstunden flexibel</option></select></div>
+      <div id="p-tage" ${flex ? "hidden" : ""}>
+        <div class="lbl">Sollarbeitszeit pro Tag (Woche: ${hm(week)} h)</div>
+        <div class="week-soll">${names.map((n, i) => `<div class="field"><label for="p-soll${i}">${n}</label><input type="time" id="p-soll${i}" value="${pad(Math.floor(s.soll[i] / 60))}:${pad(s.soll[i] % 60)}"></div>`).join("")}</div>
+      </div>
+      <div id="p-woche" ${flex ? "" : "hidden"}>
+        <div class="field"><label for="p-wstd">Stunden pro Woche</label><input id="p-wstd" inputmode="decimal" value="${String(Math.round((Number(s.wochenMin) || 0) / 60 * 100) / 100).replace(".", ",")}" placeholder="z. B. 30 oder 38,5"></div>
+        <div class="lbl">An welchen Tagen kann gearbeitet werden?</div>
+        <div class="week-soll">${names.map((n, i) => `<label class="field wt-day"><span>${n}</span><input type="checkbox" id="p-wt${i}" ${wt[i] ? "checked" : ""}></label>`).join("")}</div>
+        <p class="sub" id="p-wsub">Wann und wie lange du an einem Tag arbeitest, ist egal. Es zählt die Summe: Überstunden entstehen erst, wenn du im Monat mehr als die Sollstunden hast. Für Urlaub, Krankenstand und Feiertage wird ein Durchschnittstag angerechnet${(() => { const n = wt.filter(Boolean).length; return n ? ` (derzeit ${hm(Math.round((Number(s.wochenMin) || 0) / n))} h)` : ""; })()}.</p>
+      </div>
       <div class="grid2">
         <div class="field"><label for="p-urlaub">Urlaubsanspruch / Jahr (Tage)</label><input type="number" inputmode="decimal" step="0.5" min="0" id="p-urlaub" value="${esc(s.urlaubTage)}"></div>
         <div class="field"><label for="p-rest">Resturlaub Vorjahr (Tage)</label><input type="number" inputmode="decimal" step="0.5" id="p-rest" value="${esc(s.urlaubRest)}"></div>
@@ -1385,8 +1411,9 @@ function buildNachweis(mk) {
   <div class="nw-head"><div><h1>Stundenaufzeichnung ${esc(monthName(mk, s.region))}</h1>
     <p>${esc(s.name || "Name: ________________")}${s.persnr ? ` · Pers.-Nr. ${esc(s.persnr)}` : ""}${s.firma ? ` · ${esc(s.firma)}` : ""}</p></div>
     <p class="small">${asOf || `Erstellt am ${fmtDate(Date.now())}`}</p></div>
+  ${isFlex() ? `<p class="small">${esc(flexNote())}</p>` : ""}
   <table class="nw-t">
-    <thead><tr><th>Datum</th><th>Tag</th><th>Beginn</th><th>Ende</th><th>Pause</th><th>Arbeitszeit</th><th>Betrieb</th><th>Soll</th><th>Ist</th><th>Über&shy;stunden</th><th>Bemerkung</th></tr></thead>
+    <thead><tr><th>Datum</th><th>Tag</th><th>Beginn</th><th>Ende</th><th>Pause</th><th>Arbeitszeit</th><th>Betrieb</th><th>Soll</th><th>Ist</th><th>${isFlex() ? "Diffe&shy;renz" : "Über&shy;stunden"}</th><th>Bemerkung</th></tr></thead>
     <tbody>${rows}</tbody>
     <tfoot><tr><td colspan="4">Summe</td><td>${hm(t.brk + t.kp)}</td><td>${hm(t.worked)}</td><td>${hm(t.betr)}</td><td>${hm(t.soll)}</td><td>${hm(t.ist)}</td><td class="${t.saldo >= 0 ? "plus" : "minus"}">${hmSigned(t.saldo)}</td><td></td></tr></tfoot>
   </table>
@@ -1438,7 +1465,7 @@ function nachweisFile(mk) {
 function nachweisPng(mk) {
   const s = S.settings, t = monthStats(mk), ub = monthCarry(mk), days = monthDays(mk);
   const W = 1500, RH = 34, top = 130, headH = 42, sumH = 300;
-  const H = top + headH + days.length * RH + RH + sumH;
+  const H = top + headH + days.length * RH + RH + sumH + (isFlex() ? 30 : 0);
   const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
   const g = cv.getContext("2d"), F = (w, px) => `${w} ${px}px Arial, "Helvetica Neue", sans-serif`;
   g.fillStyle = "#fff"; g.fillRect(0, 0, W, H); g.textBaseline = "middle";
@@ -1449,7 +1476,7 @@ function nachweisPng(mk) {
   const asOf = lastDayOf(mk) < `${mk}-${pad(daysInMonth(mk))}` ? `Stand ${fmtDate(Date.now())} (Monat läuft noch)` : `Erstellt am ${fmtDate(Date.now())}`;
   g.textAlign = "right"; g.fillText(asOf, W - 40, 96); g.textAlign = "left";
   g.fillStyle = GREEN; g.fillRect(40, 116, W - 80, 4);
-  const cols = [["Datum", 40, "l"], ["Tag", 150, "l"], ["Beginn", 290, "r"], ["Ende", 390, "r"], ["Pause", 490, "r"], ["Arbeit", 610, "r"], ["Betrieb", 730, "r"], ["Soll", 840, "r"], ["Ist", 950, "r"], ["Überstd.", 1090, "r"], ["Bemerkung", 1120, "l"]];
+  const cols = [["Datum", 40, "l"], ["Tag", 150, "l"], ["Beginn", 290, "r"], ["Ende", 390, "r"], ["Pause", 490, "r"], ["Arbeit", 610, "r"], ["Betrieb", 730, "r"], ["Soll", 840, "r"], ["Ist", 950, "r"], [isFlex() ? "Differenz" : "Überstd.", 1090, "r"], ["Bemerkung", 1120, "l"]];
   const cell = (txt, i, y, color = "#111", w = 400) => { const [, x, a] = cols[i]; g.textAlign = a === "r" ? "right" : "left"; g.fillStyle = color; g.fillText(txt, x, y); };
   let y = top; g.fillStyle = GREEN; g.fillRect(40, y, W - 80, headH); g.font = F(700, 21);
   cols.forEach((c, i) => cell(c[0], i, y + headH / 2, "#fff")); y += headH;
@@ -1478,6 +1505,7 @@ function nachweisPng(mk) {
   line("Zeitkonto am Monatsende", hmSigned(ub + t.saldo) + " h", dec(ub + t.saldo) + " h");
   g.textAlign = "left"; g.font = F(400, 19); g.fillStyle = GRAY;
   g.fillText(`Urlaub ${String(t.urlaub).replace(".", ",")} Tage · Krankenstand ${t.krank} Tage · Arztbesuche ${hm(t.arzt)} h${t.kpN ? ` · Kaffeepausen ${t.kpN}×` : ""}`, 40, y + 4);
+  if (isFlex()) { g.font = F(400, 17); g.fillText(flexNote(), 40, y + 34); }
   return new Promise(res => cv.toBlob(b => res(b), "image/png"));
 }
 async function shareOrSave(filename, blob, title) {
@@ -1552,8 +1580,9 @@ function buildXlsx(mk) {
   const rows = [
     [{ t: `Stundenaufzeichnung ${monthName(mk, s.region)}`, s: 6 }],
     [[s.name, s.persnr ? "Pers.-Nr. " + s.persnr : "", s.firma].filter(Boolean).join(" · ") || "Name:"],
+    ...(isFlex() ? [[flexNote()]] : []),
     [],
-    ["Datum", "Tag", "Beginn", "Ende", "Pause (h)", "Arbeitszeit (h)", "Betrieb (h)", "Soll (h)", "Ist (h)", "Überstunden (h)", "Bemerkung", "Kunden", "Notiz"].map(x => ({ t: x, s: 1 }))
+    ["Datum", "Tag", "Beginn", "Ende", "Pause (h)", "Arbeitszeit (h)", "Betrieb (h)", "Soll (h)", "Ist (h)", diffHead() + " (h)", "Bemerkung", "Kunden", "Notiz"].map(x => ({ t: x, s: 1 }))
   ];
   const first = rows.length + 1;
   for (const ds of monthDays(mk)) {
@@ -1574,7 +1603,7 @@ function buildXlsx(mk) {
   if (ueRate && t.saldo > 0) rows.push([`Auszahlung Überstunden (brutto, ${dec2(ueRate)} € pro Stunde)`, null, null, null, null, { f: `ROUND(F${rows.length - 2}*${ueRate},2)`, v: Math.round(H(t.saldo) * ueRate * 100) / 100, s: 4 }]);
   rows.push(["Urlaub (Tage)", null, null, null, null, { n: t.urlaub, s: 0 }], ["Krankenstand (Tage)", null, null, null, null, { n: t.krank, s: 0 }], ["Arztbesuche (h)", null, null, null, null, { n: H(t.arzt), s: 3 }]);
   rows.push([], [], ["Datum, Unterschrift Mitarbeiter", null, null, null, null, null, null, "Datum, Unterschrift Arbeitgeber"]);
-  const sheets = [["Stundenaufzeichnung", sheetXml(rows, [12, 5, 8, 8, 9, 13, 10, 8, 8, 14, 28, 36, 30], 4)]];
+  const sheets = [["Stundenaufzeichnung", sheetXml(rows, [12, 5, 8, 8, 9, 13, 10, 8, 8, 14, 28, 36, 30], first - 1)]];
   // zweites Blatt: Kundeneinsätze und Material
   const kr = [[{ t: `Kundeneinsätze ${monthName(mk, s.region)}`, s: 6 }], [], ["Datum", "Tag", "Kd.-Nr.", "Kunde", "Von", "Bis", "Dauer (h)", "Notiz"].map(x => ({ t: x, s: 1 }))];
   const kFirst = kr.length + 1;
@@ -1608,7 +1637,7 @@ function buildCsv(mk) {
   L(["Erstellt am", new Date().toLocaleString("de-AT")]);
   L([]);
   // Die ersten Spalten sind das, was der Chef braucht; Details folgen dahinter
-  L(["Datum", "Wochentag", "Beginn", "Ende", "Pause (h)", "Arbeitszeit (h)", "Soll (h)", "Ist (h)", "Überstunden (h)", "Betrieb (h)", "Bemerkung",
+  L(["Datum", "Wochentag", "Beginn", "Ende", "Pause (h)", "Arbeitszeit (h)", "Soll (h)", "Ist (h)", diffHead() + " (h)", "Betrieb (h)", "Bemerkung",
     "Mittag Anfang", "Mittag Ende", "Kaffeepause (Min.)", "Arbeitsort", "Stundenweise Abwesenheit", "Beleg", "Kilometer", "Projekt / Kostenstelle", "Kunden", "Kunden (h)", "Notiz"]);
   for (const ds of monthDays(mk)) {
     const c = calc(ds), r = c.rec, d = parseDs(ds), cnt = c.counted;
@@ -1624,6 +1653,7 @@ function buildCsv(mk) {
   L(["Überstunden"]); L(["Übertrag Vormonat (h)", dec(ub)]); L(["Überstunden dieser Monat (h)", dec(t.saldo)]); L(["Zeitkonto Monatsende (h)", dec(ub + t.saldo)]);
   L([]);
   L(["Zusammenfassung"]);
+  if (isFlex()) L([flexNote()]);
   L(["Soll-Stunden", dec(t.soll)]); L(["Ist-Stunden", dec(t.ist)]); L(["davon reine Arbeitszeit", dec(t.worked)]);
 
   L(["Urlaub (Tage)", String(t.urlaub).replace(".", ",")]); L(["Krankenstand (Tage)", t.krank]); L(["Arbeitsunfall (Tage)", t.unfall]);
@@ -1935,6 +1965,16 @@ document.addEventListener("submit", e => {
     }
     s.name = $("p-name").value.trim(); s.persnr = $("p-persnr").value.trim(); s.firma = $("p-firma").value.trim();
     s.soll = [0, 1, 2, 3, 4, 5, 6].map(i => toMin($("p-soll" + i).value) || 0);
+    s.modell = $("p-modell").value;
+    if (s.modell === "woche") {
+      const wTxt = $("p-wstd").value.trim(), wm = wTxt.match(/^(\d{1,3})(?::(\d{1,2}))?$/) || wTxt.match(/^(\d{1,3})[,.](\d{1,2})$/);
+      if (!wm) { errEl.textContent = "Stunden pro Woche bitte als Zahl eingeben, z. B. 30 oder 38,5."; errEl.hidden = false; return; }
+      const wMin = wTxt.includes(":") ? Number(wm[1]) * 60 + Number(wm[2] || 0) : Math.round(parseFloat(wm[1] + "." + (wm[2] || 0)) * 60);
+      const tage = [0, 1, 2, 3, 4, 5, 6].map(i => $("p-wt" + i).checked ? 1 : 0);
+      if (!tage.some(Boolean)) { errEl.textContent = "Bitte mindestens einen Arbeitstag auswählen."; errEl.hidden = false; return; }
+      if (wMin > 80 * 60) { errEl.textContent = "Mehr als 80 Stunden pro Woche sind nicht möglich."; errEl.hidden = false; return; }
+      s.wochenMin = wMin; s.wochenTage = tage;
+    }
     s.urlaubTage = Number($("p-urlaub").value) || 0; s.urlaubRest = Number($("p-rest").value) || 0;
     s.startSaldo = saldo; s.startDate = $("p-start").value || s.startDate; s.region = $("p-region").value; s.pauseHinweis = $("p-pause").checked;
     s.kpMin = Math.max(1, Math.min(120, Math.round(Number($("p-kp").value) || 10))); s.kpAbzug = $("p-kpab").checked;
