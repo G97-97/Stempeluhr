@@ -191,6 +191,9 @@ button { cursor: pointer; }
 .kp-erow { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) 44px; gap: 8px; align-items: end; }
 .kp-erow .icon-btn { width: 44px; height: 46px; }
 .kd-open { cursor: pointer; min-width: 0; }
+.knr { display: inline-block; font-family: var(--f-num); font-size: 12px; font-weight: 600; padding: 1px 6px; border-radius: 6px; background: var(--blue-soft); color: var(--blue); vertical-align: 1px; }
+.ks-row { width: 100%; border: 0; border-bottom: 1px solid var(--line); background: none; text-align: left; font: inherit; color: inherit; }
+.ks-row svg { color: var(--muted); width: 18px; }
 .mat { margin-top: 4px; font-size: 13px; color: var(--break); font-weight: 600; }
 .kd-acts { display: flex; gap: 6px; align-items: center; }
 #print-root { position: fixed; inset: 0; z-index: 60; overflow: auto; background: var(--bg); padding: 12px 12px 40px; }
@@ -492,16 +495,71 @@ const kdMin = (k, ds) => k.to ? kdDur(k) : (ds === todayDs() && k.from ? Math.ma
 const BETRIEB = "Betrieb";
 const isBetr = k => String(k.name || "").trim().toLowerCase() === "betrieb";
 const betrMin = (r, ds) => ((r && r.kunden) || []).filter(isBetr).reduce((a, k) => a + kdMin(k, ds), 0);
+/* Kundenstamm: die Kundennummer ist der feste Schlüssel, der Name darf sich ändern.
+   S.settings.kstamm = { "<nr>": { nr, name, alt: [frühere Namen], at } }; Einsätze speichern { name, nr }. */
+const kstamm = () => S.settings.kstamm || {};
+const normName = n => String(n || "").trim().toLowerCase().replace(/\s+/g, " ");
+const kLabel = k => k.nr ? `${k.nr} · ${k.name}` : k.name;
+function findByName(name) {
+  const n = normName(name); if (!n) return null;
+  for (const e of Object.values(kstamm())) if (normName(e.name) === n) return e;
+  for (const e of Object.values(kstamm())) if ((e.alt || []).some(a => normName(a) === n)) return e;
+  return null;
+}
+// Eingabe „1234“, „1234 · Name“, „1234 Name“ oder nur „Name“ → { nr, name, typedNr }
+function resolveKunde(input) {
+  const raw = String(input || "").trim(); if (!raw) return { name: "" };
+  if (normName(raw) === "betrieb") return { name: BETRIEB };
+  const m = raw.match(/^#?(\d{1,10})(?:\s*[·\-–:;,|\/]\s*|\s+)?(.*)$/);
+  if (m) {
+    const nr = m[1], nm = m[2].trim(), e = kstamm()[nr];
+    return { nr, name: nm || (e ? e.name : ""), typedNr: true };
+  }
+  const e = findByName(raw);
+  return e ? { nr: e.nr, name: raw } : { name: raw };
+}
+// Neue Nummer oder neuer Name aus einer Eingabe in den Kundenstamm übernehmen
+function learnKunde(rk) {
+  if (!rk.nr || !rk.name || !rk.typedNr) return false;
+  const st = { ...kstamm() }, e = st[rk.nr];
+  if (!e) st[rk.nr] = { nr: rk.nr, name: rk.name, alt: [], at: Date.now() };
+  else if (normName(e.name) !== normName(rk.name)) st[rk.nr] = { ...e, name: rk.name, alt: [...new Set([...(e.alt || []), e.name])].filter(a => normName(a) !== normName(rk.name)), at: Date.now() };
+  else return false;
+  S.settings.kstamm = st; saveSettings(); return true;
+}
+// Alte Einsätze ohne Nummer per Name (oder früherem Namen) zuordnen
+function assignNumbers() {
+  let n = 0;
+  for (const mk in S.months) {
+    let ch = false;
+    for (const dd in S.months[mk].days) for (const k of S.months[mk].days[dd].kunden || []) {
+      if (k.nr || isBetr(k)) continue;
+      const e = findByName(k.name); if (e) { k.nr = e.nr; ch = true; n++; }
+    }
+    if (ch) { S.months[mk].updatedAt = Date.now(); scheduleRemote("m-" + mk); }
+  }
+  if (n) saveLocal();
+  return n;
+}
+const kKey = k => k.nr ? "#" + k.nr : normName(k.name);
+const kCurName = k => (k.nr && kstamm()[k.nr]) ? kstamm()[k.nr].name : k.name;
 function knownCustomers() {
   const m = new Map();
-  for (const mk in S.months) for (const dd in S.months[mk].days) for (const k of S.months[mk].days[dd].kunden || []) if (k.name && !isBetr(k)) m.set(k.name, (m.get(k.name) || 0) + 1);
-  return [...m.entries()].sort((a, b) => b[1] - a[1]).map(x => x[0]);
+  for (const e of Object.values(kstamm())) m.set("#" + e.nr, { label: `${e.nr} · ${e.name}`, n: 0 });
+  for (const mk in S.months) for (const dd in S.months[mk].days) for (const k of S.months[mk].days[dd].kunden || []) {
+    if (!k.name || isBetr(k)) continue;
+    const key = kKey(k), x = m.get(key) || { label: kLabel({ nr: k.nr, name: kCurName(k) }), n: 0 }; x.n++; m.set(key, x);
+  }
+  return [...m.values()].sort((a, b) => b.n - a.n || a.label.localeCompare(b.label, "de")).map(x => x.label);
 }
 function customerStats(mk) {
   const m = new Map();
   for (const ds of monthDays(mk)) {
     const r = getRec(ds);
-    for (const k of ((r && r.kunden) || []).filter(k => !isBetr(k))) { const e = m.get(k.name) || { name: k.name, min: 0, n: 0 }; e.min += kdMin(k, ds); e.n++; m.set(k.name, e); }
+    for (const k of ((r && r.kunden) || []).filter(k => !isBetr(k))) {
+      const key = kKey(k), e = m.get(key) || { key, nr: k.nr || "", name: kCurName(k), min: 0, n: 0 };
+      e.label = kLabel(e); e.min += kdMin(k, ds); e.n++; m.set(key, e);
+    }
   }
   return [...m.values()].sort((a, b) => b.min - a.min);
 }
@@ -694,7 +752,7 @@ function viewHeute() {
   const kd = r.kunden || [], kdRun = kd.findIndex(k => k.from && !k.to);
   const kundenCard = `<section class="card">
     <div class="row"><h2 style="margin:0">Kunden heute</h2>${kd.length ? `<span class="num" style="color:var(--muted);font-size:13px">${hm(kd.reduce((a, k) => a + kdMin(k, ds), 0))} h</span>` : ""}</div>
-    ${kd.length ? `<div class="list">${kd.map((k, i) => `<div class="li"><div class="kd-open" data-act="kdnote" data-i="${i}" role="button" tabindex="0"><b>${isBetr(k) ? "🏭 " : ""}${esc(k.name)}</b>${k.to ? "" : ' <span class="chip k-work">läuft</span>'}<small class="num">${esc(k.from)}–${esc(k.to || "jetzt")} · ${hm(kdMin(k, ds))} h${k.note ? " · " + esc(k.note) : ""}</small>${matOf(k.name) ? `<div class="mat">📦 ${esc(matOf(k.name)).replace(/\n/g, " · ")}</div>` : ""}</div><div class="kd-acts"><button class="btn ghost" data-act="kdnote" data-i="${i}" aria-label="Notiz zu ${esc(k.name)}">${ICON.pen}</button>${k.to ? "" : `<button class="btn primary" data-act="kdstop" data-i="${i}">Fertig</button>`}</div></div>`).join("")}</div>`
+    ${kd.length ? `<div class="list">${kd.map((k, i) => `<div class="li"><div class="kd-open" data-act="kdnote" data-i="${i}" role="button" tabindex="0"><b>${isBetr(k) ? "🏭 " : ""}${k.nr ? `<span class="knr">${esc(k.nr)}</span> ` : ""}${esc(k.name)}</b>${k.to ? "" : ' <span class="chip k-work">läuft</span>'}<small class="num">${esc(k.from)}–${esc(k.to || "jetzt")} · ${hm(kdMin(k, ds))} h${k.note ? " · " + esc(k.note) : ""}</small>${matOf(kLabel(k)) ? `<div class="mat">📦 ${esc(matOf(kLabel(k))).replace(/\n/g, " · ")}</div>` : ""}</div><div class="kd-acts"><button class="btn ghost" data-act="kdnote" data-i="${i}" aria-label="Notiz zu ${esc(k.name)}">${ICON.pen}</button>${k.to ? "" : `<button class="btn primary" data-act="kdstop" data-i="${i}">Fertig</button>`}</div></div>`).join("")}</div>`
       : `<p class="hint" style="margin:8px 0 0">Tippe auf „Beim Kunden angekommen“, wenn du bei einer Kundschaft anfängst. Die Zeit läuft, bis du „Fertig“ tippst.</p>`}
     <div class="btn-row" style="margin-top:12px">${kdRun < 0 || isBetr(kd[kdRun]) ? `<button class="btn primary grow" data-act="kdstart" data-ds="${ds}">Beim Kunden angekommen</button>` : ""}<button class="btn grow" data-act="kdadd" data-ds="${ds}">+ Nachtragen</button></div>
   </section>`;
@@ -748,7 +806,7 @@ function viewMonat() {
     const tags = [];
     if (c.kind !== "arbeit") tags.push(`<span class="chip ${c.K.cls}">${esc(c.kind === "feiertag" && c.hol ? c.hol : c.K.label)}</span>`);
     if (c.rec.ort && c.rec.ort !== "betrieb") tags.push(`<span class="chip">${esc(ORTE[c.rec.ort] || c.rec.ort)}</span>`);
-    for (const k of c.rec.kunden || []) tags.push(`<span class="chip k-blue">${esc(k.name)} ${hm(kdMin(k, ds))}</span>`);
+    for (const k of c.rec.kunden || []) tags.push(`<span class="chip k-blue">${esc(kLabel(k))} ${hm(kdMin(k, ds))}</span>`);
     if (c.kp) tags.push(`<span class="chip k-warn">☕ ${(c.rec.kp || []).length}× · ${c.kp} Min.</span>`);
     for (const a of c.rec.abs || []) tags.push(`<span class="chip k-violet">${esc((PARTIAL[a.type] || {}).label || "")} ${hm(Math.max(0, toMin(a.to) - toMin(a.from)))}</span>`);
     if (c.incomplete) tags.push(`<span class="chip k-warn">Stempelung unvollständig</span>`);
@@ -801,7 +859,7 @@ function viewMonat() {
       <button class="btn grow" data-act="report">${ICON.copy} Bericht als Text</button>
     </div>
   </section>
-  ${(() => { const cs = customerStats(mk); return cs.length ? `<section class="card"><h2>Kunden im ${MONTHS[+mk.slice(5) - 1]}</h2><dl class="kv">${cs.map(e => `<dt>${esc(e.name)} <small style="color:var(--muted)">· ${e.n} ${e.n === 1 ? "Einsatz" : "Einsätze"}</small></dt><dd>${hm(e.min)} h</dd>`).join("")}</dl></section>` : ""; })()}
+  ${(() => { const cs = customerStats(mk); return cs.length ? `<section class="card"><h2>Kunden im ${MONTHS[+mk.slice(5) - 1]}</h2><dl class="kv">${cs.map(e => `<dt>${esc(e.label)} <small style="color:var(--muted)">· ${e.n} ${e.n === 1 ? "Einsatz" : "Einsätze"}</small></dt><dd>${hm(e.min)} h</dd>`).join("")}</dl></section>` : ""; })()}
   <section class="days" aria-label="Tage">${rows}</section>
   ${(() => { const e = earn(t); return `<section class="card earn">
     <h2>Verdienst im ${MONTHS[+mk.slice(5) - 1]}</h2>
@@ -825,9 +883,12 @@ document.addEventListener("click", e => {
 });
 function showKdMat() {
   const box = $("k-mat"), n = $("k-name"); if (!box || !n) return;
-  const t = matOf(n.value); box.hidden = !t; box.innerHTML = t ? `<b>📦 Material für ${esc(((S.settings.mat || {})[matKey(n.value)] || {}).name || n.value.trim())}:</b><br>${esc(t).replace(/\n/g, "<br>")}` : "";
+  const t = matOf(n.value); box.hidden = !t; box.innerHTML = t ? `<b>📦 Material für ${esc(kLabel(resolveKunde(n.value)))}:</b><br>${esc(t).replace(/\n/g, "<br>")}` : "";
 }
-document.addEventListener("input", e => { if (e.target.id === "k-name") showKdMat(); });
+document.addEventListener("input", e => {
+  if (e.target.id === "k-name") showKdMat();
+  if (e.target.id === "ks-q") { const v = e.target.value, pos = e.target.selectionStart; openKstamm(v); const q = $("ks-q"); q.focus(); q.setSelectionRange(pos, pos); }
+});
 document.addEventListener("input", e => {
   if (e.target.id !== "m-rate" && e.target.id !== "m-basis") return;
   if (e.target.id === "m-basis") { S.settings.rateBasis = e.target.value; $("m-rate").value = String(rateStr(e.target.value)).replace(".", ","); }
@@ -852,7 +913,7 @@ function yearStats(year) {
     for (const ds of monthDays(mk)) {
       const c = calc(ds); if (!c.counted || !c.worked) continue;
       const o = ORTE[c.rec.ort || "betrieb"] || c.rec.ort; (orte[o] = orte[o] || { tage: 0, min: 0 }); orte[o].tage++; orte[o].min += c.worked;
-      for (const k of (c.rec.kunden || []).filter(k => !isBetr(k))) { const kk = kunden[k.name] || (kunden[k.name] = { name: k.name, n: 0, min: 0, first: ds, last: ds }); kk.n++; kk.min += kdMin(k, ds); if (ds < kk.first) kk.first = ds; if (ds > kk.last) kk.last = ds; }
+      for (const k of (c.rec.kunden || []).filter(k => !isBetr(k))) { const key = kKey(k), kk = kunden[key] || (kunden[key] = { name: kLabel({ nr: k.nr, name: kCurName(k) }), n: 0, min: 0, first: ds, last: ds }); kk.n++; kk.min += kdMin(k, ds); if (ds < kk.first) kk.first = ds; if (ds > kk.last) kk.last = ds; }
     }
   }
   return { y, months, orte: Object.entries(orte).sort((a, b) => b[1].min - a[1].min), kunden: Object.values(kunden).sort((a, b) => b.min - a.min) };
@@ -912,7 +973,7 @@ function buildYearCsv(year) {
     const c = calc(ds), r = c.rec, d = parseDs(ds);
     if (!getRec(ds)) continue;
     L([`${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`, WD_LONG[d.getDay()], c.kind === "arbeit" ? "Arbeitstag" : c.K.label, r.in ? (ORTE[r.ort || "betrieb"] || r.ort) : "", r.in || "", r.out || "", c.worked ? dec(c.worked) : "",
-      (r.kunden || []).map(k => `${k.name} ${k.from}-${k.to || ""}`).join(", "), r.projekt || "", r.note || ""]);
+      (r.kunden || []).map(k => `${kLabel(k)} ${k.from}-${k.to || ""}`).join(", "), r.projekt || "", r.note || ""]);
   }
   return "\ufeff" + lines.join("\r\n");
 }
@@ -1018,6 +1079,13 @@ function viewProfil() {
       <button class="btn primary" type="submit">Speichern</button>
     </form>
   </section>
+  ${(() => { const st = Object.values(kstamm()), ohne = knownCustomers().filter(l => !/^\d/.test(l));
+    return `<section class="card">
+    <div class="row"><h2 style="margin:0">Kundenstamm</h2><span class="num" style="color:var(--muted);font-size:13px">${st.length} Kunden</span></div>
+    <p class="hint" style="margin:6px 0 10px">Jeder Kunde hat eine feste Nummer. Der Name darf sich ändern, die Nummer bleibt. Beim Eintragen reicht die Nummer, z. B. „1234“.</p>
+    <div class="btn-row"><button class="btn primary grow" data-act="ksopen">Kundenliste öffnen</button><button class="btn grow" data-act="kspaste">Liste einfügen</button></div>
+    ${ohne.length ? `<p class="hint" style="margin:10px 0 0"><b>${ohne.length} ${ohne.length === 1 ? "Kunde" : "Kunden"} ohne Nummer:</b> ${ohne.slice(0, 8).map(esc).join(", ")}${ohne.length > 8 ? " …" : ""}. In der Kundenliste kannst du Nummern zuordnen.</p>` : ""}
+  </section>`; })()}
   <section class="card">
     <h2>Datensicherung</h2>
     <p class="hint" style="margin:0 0 12px">${syncMode === "device" ? "Deine Zeiten sind nur auf diesem Handy gespeichert. Wenn du die App löschst oder das Handy wechselst, sind sie weg. Lade deshalb regelmäßig eine Sicherung herunter, zum Beispiel einmal im Monat." : syncMode === "cloud" ? "Deine Zeiten werden automatisch in deinem Claude-Konto gesichert und sind auf jedem Gerät verfügbar, auf dem du angemeldet bist." : "Deine Zeiten sind gerade nur auf diesem Gerät gespeichert. Lade regelmäßig eine Sicherung herunter."}</p>
@@ -1062,7 +1130,7 @@ function renderEditor(err) {
       <button type="button" class="icon-btn" data-act="absdel" data-i="${i}" aria-label="Entfernen">${ICON.x}</button></div>`).join("");
   const kdTot = rec.kunden.reduce((t, k) => t + kdDur(k), 0);
   const kdRows = rec.kunden.map((k, i) => `<div class="kd-tr">
-      <input id="e-kn${i}" list="kd-list" autocomplete="off" placeholder="Kunde" aria-label="Kunde ${i + 1}" data-kd="${i}" data-f="name" value="${esc(k.name || "")}">
+      <input id="e-kn${i}" list="kd-list" autocomplete="off" placeholder="Kunde" aria-label="Kunde ${i + 1}" data-kd="${i}" data-f="name" value="${esc(k.name ? kLabel(k) : "")}">
       <input type="time" id="e-kf${i}" aria-label="Von" data-kd="${i}" data-f="from" value="${esc(k.from || "")}">
       <input type="time" id="e-kb${i}" aria-label="Bis" data-kd="${i}" data-f="to" value="${esc(k.to || "")}">
       <button type="button" class="icon-btn" data-act="kdrowdel" data-i="${i}" aria-label="Entfernen">${ICON.x}</button>
@@ -1126,6 +1194,7 @@ function validateRec(r) {
   if (r.out && r.le && t("out") < t("le") && t("out") > t("in")) return "Arbeitsende liegt vor dem Mittag Ende.";
   for (const k of r.kunden || []) {
     if (!k.name || !k.from) return "Bitte bei jedem Kunden Name und Von eintragen.";
+    { const rk = resolveKunde(k.name); if (rk.nr && !rk.name) return `Kundennummer ${rk.nr} ist noch nicht im Kundenstamm. Bitte „${rk.nr} Name“ eintragen.`; }
     if (k.to && k.to === k.from) return `Bei ${k.name} sind Von und Bis gleich.`;
   }
   for (const k of r.kp || []) if (!(k.min >= 1 && k.min <= 120)) return "Bitte bei jeder Kaffeepause 1 bis 120 Minuten eintragen.";
@@ -1138,7 +1207,7 @@ function cleanRec(r) {
     if (k === "abs") { if (v.length) out.abs = v.map(a => ({ type: a.type, from: a.from, to: a.to })); continue; }
     if (k === "kp") { const ks = v.map(x => ({ at: x.at || "", min: Math.round(Number(x.min)) })).filter(x => x.min > 0).sort((a, b) => a.at.localeCompare(b.at)); if (ks.length) out.kp = ks; continue; }
     if (k === "kunden") {
-      const ks = v.map(x => { const o = { name: String(x.name || "").trim(), from: x.from || "" }; if (x.to) o.to = x.to; if (x.note) o.note = x.note; return o; })
+      const ks = v.map(x => { const rk = resolveKunde(x.name); learnKunde(rk); const o = { name: rk.name, from: x.from || "" }; if (rk.nr) o.nr = rk.nr; if (x.to) o.to = x.to; if (x.note) o.note = x.note; return o; })
         .filter(x => x.name || x.from || x.to).sort((a, b) => (a.from || "").localeCompare(b.from || ""));
       if (ks.length) out.kunden = ks; continue;
     }
@@ -1159,7 +1228,7 @@ function openKunde(ds, mode) {
     <h3>${mode === "start" ? "Beim Kunden angekommen" : "Kundeneinsatz nachtragen"}</h3>
     <p class="sub">${mode === "start" ? "Die Zeit läuft ab jetzt, bis du bei diesem Kunden auf „Fertig“ tippst." : "Kunde mit Von- und Bis-Zeit eintragen."}</p>
     <form class="form" id="kd-form" data-mode="${mode}">
-      <div class="field"><label for="k-name">Kunde</label><input id="k-name" list="kd-list" autocomplete="off" placeholder="z. B. Familie Huber, Baustelle Linz" required></div>
+      <div class="field"><label for="k-name">Kunde</label><input id="k-name" list="kd-list" autocomplete="off" placeholder="Nummer oder Name, z. B. 1234 Huber" required></div>
       ${top.length ? `<div class="btn-row">${top.map(n => `<button type="button" class="chip" style="border:0;padding:8px 12px;font-size:13px" data-act="kdpick" data-name="${esc(n)}">${esc(n)}</button>`).join("")}</div>` : ""}
       ${mode === "start" ? `<div class="field"><label for="k-from">Ankunft</label><input type="time" id="k-from" value="${nowHM()}"></div><input type="hidden" id="k-date" value="${ds}">`
         : `<div class="field"><label for="k-date">Datum</label><input type="date" id="k-date" value="${ds}"></div>
@@ -1190,27 +1259,81 @@ function addKaffee(min, ds = todayDs(), at = nowHM()) {
   toast(`Kaffeepause ${min} Min.${ds !== todayDs() ? " am " + fmtShort(ds) : ""} um ${at} eingetragen`, true); render();
 }
 // Materialliste gehört zum Kunden (nicht zum einzelnen Einsatz), damit sie beim nächsten Besuch da ist
-const matKey = n => String(n || "").trim().toLowerCase();
-const matOf = n => ((S.settings.mat || {})[matKey(n)] || {}).text || "";
+const matKey = n => { const rk = resolveKunde(n); return rk.nr ? "#" + rk.nr : normName(rk.name); };
+const matNames = rk => { const e = rk.nr && kstamm()[rk.nr]; return [rk.name, ...(e ? [e.name, ...(e.alt || [])] : [])].map(normName); };
+const matOf = n => { const m = S.settings.mat || {}, rk = resolveKunde(n); if (rk.nr && m["#" + rk.nr]) return m["#" + rk.nr].text || ""; for (const x of matNames(rk)) if (m[x]) return m[x].text || ""; return ""; };
 function setMat(name, text) {
-  const m = { ...(S.settings.mat || {}) }, k = matKey(name);
-  if (text) m[k] = { name: name.trim(), text, at: Date.now() }; else delete m[k];
+  const m = { ...(S.settings.mat || {}) }, rk = resolveKunde(name), k = matKey(name);
+  for (const x of matNames(rk)) delete m[x];
+  if (text) m[k] = { name: kLabel(rk), text, at: Date.now() }; else delete m[k];
   S.settings.mat = m; saveSettings();
 }
 function openKdNote(i) {
   const k = ((getRec(todayDs()) || {}).kunden || [])[i]; if (!k) return;
   openSheet(`${kdDatalist()}<h3>${esc(k.name)}</h3><p class="sub">${k.to ? "Einsatz bearbeiten" : "Einsatz läuft gerade"}</p>
     <form class="form" id="kdnote-form" data-i="${i}">
-      <div class="field"><label for="kn-name">Kunde</label><input id="kn-name" list="kd-list" autocomplete="off" value="${esc(k.name)}"></div>
+      <div class="field"><label for="kn-name">Kunde</label><input id="kn-name" list="kd-list" autocomplete="off" value="${esc(kLabel(k))}"></div>
       <div class="grid2"><div class="field"><label for="kn-from">Von</label><input type="time" id="kn-from" value="${esc(k.from || "")}"></div>
         <div class="field"><label for="kn-to">Bis${k.to ? "" : " (leer = läuft)"}</label><input type="time" id="kn-to" value="${esc(k.to || "")}"></div></div>
       <div class="field"><label for="kn-text">Was gemacht / Notiz</label><textarea id="kn-text" placeholder="z. B. Heizung getauscht">${esc(k.note || "")}</textarea></div>
-      <div class="field"><label for="kn-mat">Material fürs nächste Mal</label><textarea id="kn-mat" placeholder="Eine Sache pro Zeile, z. B.&#10;2× Scharnier 35 mm&#10;Silikon weiß">${esc(matOf(k.name))}</textarea>
+      <div class="field"><label for="kn-mat">Material fürs nächste Mal</label><textarea id="kn-mat" placeholder="Eine Sache pro Zeile, z. B.&#10;2× Scharnier 35 mm&#10;Silikon weiß">${esc(matOf(kLabel(k)))}</textarea>
         <small class="hint" style="margin:0">Bleibt bei ${esc(k.name)} gespeichert und wird beim nächsten Einsatz angezeigt. Wenn alles besorgt ist, einfach leeren.</small></div>
       <div id="kn-err" class="err" hidden></div>
       <div class="sheet-actions"><button class="btn primary grow" type="submit">Speichern</button><button class="btn grow" type="button" data-act="closesheet-btn">Abbrechen</button></div>
       <button class="btn ghost" type="button" data-act="kddel" data-i="${i}" style="width:100%;color:var(--danger)">Diesen Einsatz löschen</button>
     </form>`);
+}
+function openKstamm(q = "") {
+  const st = Object.values(kstamm()).sort((a, b) => (+a.nr - +b.nr) || a.nr.localeCompare(b.nr));
+  const ohne = knownCustomers().filter(l => !/^\d/.test(l));
+  const nq = normName(q), hit = e => !nq || e.nr.includes(nq) || normName(e.name).includes(nq) || (e.alt || []).some(a => normName(a).includes(nq));
+  openSheet(`<h3>Kundenliste</h3><p class="sub">${st.length} Kunden mit Nummer</p>
+    <div class="field"><label for="ks-q">Suchen (Nummer oder Name)</label><input id="ks-q" autocomplete="off" value="${esc(q)}" placeholder="z. B. 1234 oder Huber"></div>
+    <div class="btn-row" style="margin:10px 0"><button class="btn primary grow" data-act="ksedit" data-nr="">+ Neuer Kunde</button><button class="btn grow" data-act="kspaste">Liste einfügen</button></div>
+    <div class="list ks-list">${st.filter(hit).map(e => `<button class="li ks-row" data-act="ksedit" data-nr="${esc(e.nr)}"><div><b><span class="knr">${esc(e.nr)}</span> ${esc(e.name)}</b>${(e.alt || []).length ? `<small>früher: ${esc(e.alt.join(", "))}</small>` : ""}</div>${ICON.pen}</button>`).join("") || '<p class="hint">Keine Treffer.</p>'}</div>
+    ${ohne.length && !nq ? `<div class="lbl" style="margin-top:14px">Ohne Nummer (aus deinen Einträgen)</div><div class="list">${ohne.map(n => `<button class="li ks-row" data-act="ksedit" data-nr="" data-name="${esc(n)}"><div><b>${esc(n)}</b><small>Nummer zuordnen</small></div>${ICON.pen}</button>`).join("")}</div>` : ""}
+    <div class="sheet-actions"><button class="btn grow" type="button" data-act="closesheet-btn">Schließen</button></div>`);
+}
+function openKsEdit(nr, name) {
+  const e = nr ? kstamm()[nr] : null;
+  openSheet(`<h3>${e ? "Kunde bearbeiten" : "Neuer Kunde"}</h3><p class="sub">${e ? "Wenn sich der Name ändert, bleibt der alte als „früher“ gespeichert." : "Nummer und Name eintragen."}</p>
+    <form class="form" id="ks-form" data-old="${esc(nr || "")}" data-from="${esc(name || "")}">
+      <div class="grid2"><div class="field"><label for="ks-nr">Kundennummer</label><input id="ks-nr" inputmode="numeric" autocomplete="off" value="${esc(e ? e.nr : "")}" required></div>
+        <div class="field"><label for="ks-name">Name</label><input id="ks-name" autocomplete="off" value="${esc(e ? e.name : name || "")}" required></div></div>
+      ${e && (e.alt || []).length ? `<p class="hint" style="margin:0">Früher: ${esc(e.alt.join(", "))}</p>` : ""}
+      <div id="ks-err" class="err" hidden></div>
+      <div class="sheet-actions"><button class="btn primary grow" type="submit">Speichern</button><button class="btn grow" type="button" data-act="ksopen">Zurück</button></div>
+      ${e ? `<button class="btn ghost" type="button" data-act="ksdel" data-nr="${esc(e.nr)}" style="width:100%;color:var(--danger)">Aus Kundenliste löschen</button>` : ""}
+    </form>`);
+}
+function openKsPaste() {
+  openSheet(`<h3>Kundenliste einfügen</h3><p class="sub">Eine Zeile pro Kunde: Nummer und Name, z. B. „1234 Huber“ oder „1234;Huber“. Vorhandene Nummern bekommen den neuen Namen.</p>
+    <form class="form" id="ksp-form">
+      <div class="field"><label for="ksp-text">Liste</label><textarea id="ksp-text" style="min-height:180px" placeholder="1001 Huber&#10;1002 Maier Bau&#10;1003 Gemeinde Wels"></textarea></div>
+      <div id="ksp-err" class="err" hidden></div>
+      <div class="sheet-actions"><button class="btn primary grow" type="submit">Übernehmen</button><button class="btn grow" type="button" data-act="closesheet-btn">Abbrechen</button></div>
+    </form>`);
+}
+function parseKundenListe(text) {
+  const out = [], bad = [];
+  for (const line of String(text).split(/\r?\n/)) {
+    const l = line.trim(); if (!l) continue;
+    const m = l.match(/^#?(\d{1,10})\s*[;:,\-–·|\t]?\s*(.+)$/) || l.match(/^(.+?)\s*[;:,\-–·|\t]\s*#?(\d{1,10})$/);
+    if (!m) { bad.push(l); continue; }
+    const [nr, name] = /^\d/.test(m[1]) ? [m[1], m[2]] : [m[2], m[1]];
+    out.push({ nr, name: name.replace(/^["']|["']$/g, "").trim() });
+  }
+  return { out, bad };
+}
+function importKunden(list) {
+  const st = { ...kstamm() }; let neu = 0, ren = 0;
+  for (const { nr, name } of list) {
+    const e = st[nr];
+    if (!e) { st[nr] = { nr, name, alt: [], at: Date.now() }; neu++; }
+    else if (normName(e.name) !== normName(name)) { st[nr] = { ...e, name, alt: [...new Set([...(e.alt || []), e.name])].filter(a => normName(a) !== normName(name)), at: Date.now() }; ren++; }
+  }
+  S.settings.kstamm = st; saveSettings();
+  return { neu, ren, zug: assignNumbers() };
 }
 function openPartial(ds) {
   draft = { partial: true, ds };
@@ -1438,7 +1561,7 @@ function buildXlsx(mk) {
     const diff = c.counted && (c.saldo || c.ist) ? c.saldo : 0;
     rows.push([{ t: `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`, s: we ? 8 : 0 }, { t: WD[d.getDay()], s: we ? 8 : 0 }, tm(r.in), tm(r.out), num(c.brk + c.kp), num(c.worked), num(betrMin(r, ds)),
       c.soll ? { n: H(c.soll), s: 3 } : null, c.counted && c.ist ? { n: H(c.ist), s: 3 } : null, diff ? { n: H(diff), s: 7 } : null, dayRemark(c),
-      (r.kunden || []).map(k => `${k.name} ${k.from}–${k.to || ""}`).join(", "), r.note || ""]);
+      (r.kunden || []).map(k => `${kLabel(k)} ${k.from}–${k.to || ""}`).join(", "), r.note || ""]);
   }
   const last = rows.length, sum = (col, m, st = 4) => ({ f: `SUM(${col}${first}:${col}${last})`, v: H(m), s: st });
   rows.push([{ t: "Summe", s: 5 }, null, null, null, sum("E", t.brk + t.kp), sum("F", t.worked), sum("G", t.betr), sum("H", t.soll), sum("I", t.ist), sum("J", t.saldo, 7)]);
@@ -1453,16 +1576,16 @@ function buildXlsx(mk) {
   rows.push([], [], ["Datum, Unterschrift Mitarbeiter", null, null, null, null, null, null, "Datum, Unterschrift Arbeitgeber"]);
   const sheets = [["Stundenaufzeichnung", sheetXml(rows, [12, 5, 8, 8, 9, 13, 10, 8, 8, 14, 28, 36, 30], 4)]];
   // zweites Blatt: Kundeneinsätze und Material
-  const kr = [[{ t: `Kundeneinsätze ${monthName(mk, s.region)}`, s: 6 }], [], ["Datum", "Tag", "Kunde", "Von", "Bis", "Dauer (h)", "Notiz"].map(x => ({ t: x, s: 1 }))];
+  const kr = [[{ t: `Kundeneinsätze ${monthName(mk, s.region)}`, s: 6 }], [], ["Datum", "Tag", "Kd.-Nr.", "Kunde", "Von", "Bis", "Dauer (h)", "Notiz"].map(x => ({ t: x, s: 1 }))];
   const kFirst = kr.length + 1;
-  for (const ds of monthDays(mk)) { const r = getRec(ds), d = parseDs(ds); for (const k of (r && r.kunden) || []) kr.push([`${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`, WD[d.getDay()], k.name, tm(k.from), tm(k.to), { n: H(kdMin(k, ds)), s: 3 }, k.note || ""]); }
+  for (const ds of monthDays(mk)) { const r = getRec(ds), d = parseDs(ds); for (const k of (r && r.kunden) || []) kr.push([`${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`, WD[d.getDay()], k.nr && /^\d{1,15}$/.test(k.nr) && !k.nr.startsWith("0") ? { n: +k.nr, s: 0 } : (k.nr || ""), k.name, tm(k.from), tm(k.to), { n: H(kdMin(k, ds)), s: 3 }, k.note || ""]); }
   if (kr.length >= kFirst) {
-    kr.push([{ t: "Summe", s: 5 }, null, null, null, null, { f: `SUM(F${kFirst}:F${kr.length})`, v: H(customerStats(mk).reduce((a, e) => a + e.min, 0) + t.betr), s: 4 }]);
-    kr.push([], [{ t: "Je Kunde", s: 5 }], ["Kunde", "Einsätze", "Stunden (h)"].map(x => ({ t: x, s: 1 })));
-    for (const e of customerStats(mk)) kr.push([e.name, { n: e.n, s: 0 }, { n: H(e.min), s: 3 }]);
-    const mats = customerStats(mk).filter(e => matOf(e.name));
-    if (mats.length) { kr.push([], [{ t: "Material fürs nächste Mal", s: 5 }]); for (const e of mats) for (const x of matOf(e.name).split("\n")) kr.push([e.name, x]); }
-    sheets.push(["Kunden", sheetXml(kr, [12, 5, 24, 8, 8, 10, 40], 3)]);
+    kr.push([{ t: "Summe", s: 5 }, null, null, null, null, null, { f: `SUM(G${kFirst}:G${kr.length})`, v: H(customerStats(mk).reduce((a, e) => a + e.min, 0) + t.betr), s: 4 }]);
+    kr.push([], [{ t: "Je Kunde", s: 5 }], ["Kd.-Nr.", "Kunde", "Einsätze", "Stunden (h)"].map(x => ({ t: x, s: 1 })));
+    for (const e of customerStats(mk)) kr.push([e.nr || "", e.name, { n: e.n, s: 0 }, { n: H(e.min), s: 3 }]);
+    const mats = customerStats(mk).filter(e => matOf(e.label));
+    if (mats.length) { kr.push([], [{ t: "Material fürs nächste Mal", s: 5 }]); for (const e of mats) for (const x of matOf(e.label).split("\n")) kr.push([e.nr || "", e.name, x]); }
+    sheets.push(["Kunden", sheetXml(kr, [12, 5, 9, 24, 8, 8, 10, 40], 3)]);
   }
   const files = [
     ["[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>`],
@@ -1493,7 +1616,7 @@ function buildCsv(mk) {
     L([`${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`, WD_LONG[d.getDay()], r.in || "", r.out || "", (c.brk + c.kp) ? dec(c.brk + c.kp) : "", c.worked ? dec(c.worked) : "",
       dec(c.soll), cnt ? dec(c.ist) : "", cnt && (c.saldo || c.ist) ? dec(c.saldo) : "", betrMin(r, ds) ? dec(betrMin(r, ds)) : "", dayRemark(c),
       r.ls || "", r.le || "", c.kp || "", r.in ? (ORTE[r.ort || "betrieb"] || r.ort) : "", absTxt, r.beleg ? "ja" : "", r.km ? String(r.km).replace(".", ",") : "", r.projekt || "",
-      (r.kunden || []).map(k => `${k.name} ${k.from}-${k.to || ""}`).join(", "), (r.kunden || []).length ? dec((r.kunden || []).reduce((a, k) => a + kdMin(k, ds), 0)) : "", r.note || ""]);
+      (r.kunden || []).map(k => `${kLabel(k)} ${k.from}-${k.to || ""}`).join(", "), (r.kunden || []).length ? dec((r.kunden || []).reduce((a, k) => a + kdMin(k, ds), 0)) : "", r.note || ""]);
   }
   const ub = monthCarry(mk);
   L(["Summe", "", "", "", dec(t.brk + t.kp), dec(t.worked), dec(t.soll), dec(t.ist), dec(t.saldo), dec(t.betr), ""]);
@@ -1512,12 +1635,12 @@ function buildCsv(mk) {
   const cs = customerStats(mk);
   if (cs.length) {
     L([]); L(["Kundeneinsätze"]);
-    L(["Datum", "Wochentag", "Kunde", "Von", "Bis", "Dauer (h)", "Notiz"]);
-    for (const ds of monthDays(mk)) { const r = getRec(ds), d = parseDs(ds); for (const k of (r && r.kunden) || []) L([`${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`, WD_LONG[d.getDay()], k.name, k.from, k.to || "", dec(kdMin(k, ds)), k.note || ""]); }
-    const mats = cs.filter(e => matOf(e.name));
-    if (mats.length) { L([]); L(["Materialliste fürs nächste Mal"]); L(["Kunde", "Material"]); for (const e of mats) for (const x of matOf(e.name).split("\n")) L([e.name, x]); }
-    L([]); L(["Summe je Kunde"]); L(["Kunde", "Einsätze", "Stunden (h)"]);
-    for (const e of cs) L([e.name, e.n, dec(e.min)]);
+    L(["Datum", "Wochentag", "Kd.-Nr.", "Kunde", "Von", "Bis", "Dauer (h)", "Notiz"]);
+    for (const ds of monthDays(mk)) { const r = getRec(ds), d = parseDs(ds); for (const k of (r && r.kunden) || []) L([`${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`, WD_LONG[d.getDay()], k.nr || "", k.name, k.from, k.to || "", dec(kdMin(k, ds)), k.note || ""]); }
+    const mats = cs.filter(e => matOf(e.label));
+    if (mats.length) { L([]); L(["Materialliste fürs nächste Mal"]); L(["Kd.-Nr.", "Kunde", "Material"]); for (const e of mats) for (const x of matOf(e.label).split("\n")) L([e.nr || "", e.name, x]); }
+    L([]); L(["Summe je Kunde"]); L(["Kd.-Nr.", "Kunde", "Einsätze", "Stunden (h)"]);
+    for (const e of cs) L([e.nr || "", e.name, e.n, dec(e.min)]);
   }
   L([]); L(["Unterschrift Mitarbeiter", ""]); L(["Unterschrift Arbeitgeber", ""]);
   return "﻿" + lines.join("\r\n");
@@ -1537,9 +1660,9 @@ function buildReport(mk) {
   for (const ds of monthDays(mk)) { const c = calc(ds); if (c.kind !== "arbeit" && c.kind !== "feiertag" && c.soll > 0) abs.push(`${fmtShort(ds)} ${c.K.label}${c.rec.beleg ? " (Beleg)" : ""}`); for (const a of c.rec.abs || []) abs.push(`${fmtShort(ds)} ${(PARTIAL[a.type] || {}).label} ${a.from}–${a.to}`); }
   if (abs.length) lines.push("", "Abwesenheiten:", ...abs.map(x => "• " + x));
   const cs = customerStats(mk);
-  if (cs.length) lines.push("", "Kunden:", ...cs.map(e => `• ${e.name}: ${hm(e.min)} h (${e.n} ${e.n === 1 ? "Einsatz" : "Einsätze"})`));
-  const mats = cs.filter(e => matOf(e.name));
-  if (mats.length) lines.push("", "Material fürs nächste Mal:", ...mats.map(e => `• ${e.name}: ${matOf(e.name).split("\n").join(", ")}`));
+  if (cs.length) lines.push("", "Kunden:", ...cs.map(e => `• ${e.label}: ${hm(e.min)} h (${e.n} ${e.n === 1 ? "Einsatz" : "Einsätze"})`));
+  const mats = cs.filter(e => matOf(e.label));
+  if (mats.length) lines.push("", "Material fürs nächste Mal:", ...mats.map(e => `• ${e.label}: ${matOf(e.label).split("\n").join(", ")}`));
   return lines.filter((x, i, a) => !(x === "" && a[i - 1] === "")).join("\n");
 }
 async function offerFile(filename, data) {
@@ -1615,6 +1738,10 @@ document.addEventListener("click", async e => {
     case "kprowadd": readDraftInputs(); draft.rec.kp.push({ at: "", min: kpDefault() }); renderEditor(); break;
     case "kprowdel": readDraftInputs(); draft.rec.kp.splice(+el.dataset.i, 1); renderEditor(); break;
     case "kdnote": openKdNote(+el.dataset.i); break;
+    case "ksopen": openKstamm(); break;
+    case "kspaste": openKsPaste(); break;
+    case "ksedit": openKsEdit(el.dataset.nr, el.dataset.name); break;
+    case "ksdel": { const st = { ...kstamm() }; delete st[el.dataset.nr]; S.settings.kstamm = st; saveSettings(); toast(`Kunde ${el.dataset.nr} aus der Liste gelöscht. Alte Einträge behalten die Nummer.`); openKstamm(); break; }
     case "betrieb": {
       const ds = todayDs(), prev = getRec(ds), r = clone(prev || { kind: holidayName(ds) ? "feiertag" : "arbeit" }), now = nowHM();
       r.kunden = r.kunden || [];
@@ -1712,13 +1839,14 @@ document.addEventListener("submit", e => {
     setRec(ds, isEmptyRec(r, ds) ? null : r);
     closeSheet(); toast("Gespeichert."); render();
   } else if (f.id === "kd-form") {
-    const mode = f.dataset.mode, ds = $("k-date").value, name = $("k-name").value.trim(), from = $("k-from").value, to = mode === "add" ? $("k-to").value : "", errEl = $("k-err");
+    const rk = resolveKunde($("k-name").value), mode = f.dataset.mode, ds = $("k-date").value, name = rk.name, from = $("k-from").value, to = mode === "add" ? $("k-to").value : "", errEl = $("k-err");
     const fail = m => { errEl.textContent = m; errEl.hidden = false; };
-    if (!name) return fail("Bitte den Namen des Kunden eintragen.");
+    if (!name) return fail(rk.nr ? `Kundennummer ${rk.nr} ist noch nicht im Kundenstamm. Bitte „${rk.nr} Name“ eintragen.` : "Bitte Nummer oder Name des Kunden eintragen.");
     if (!ds || !from) return fail("Bitte Datum und Von-Zeit eintragen.");
     if (mode === "add" && (!to || to === from)) return fail("Bitte eine Bis-Zeit eintragen, die sich von der Von-Zeit unterscheidet.");
     const r = clone(getRec(ds) || { kind: holidayName(ds) ? "feiertag" : "arbeit" });
-    const k = { name, from }; if (to) k.to = to; const note = $("k-note").value.trim(); if (note) k.note = note;
+    learnKunde(rk);
+    const k = { name, from }; if (rk.nr) k.nr = rk.nr; if (to) k.to = to; const note = $("k-note").value.trim(); if (note) k.note = note;
     // Beim Start endet ein laufender Einsatz (z. B. Betrieb) zur Ankunftszeit
     if (mode === "start") for (const x of r.kunden || []) if (x.from && !x.to) x.to = toMin(from) > toMin(x.from) ? from : pad(Math.floor(((toMin(x.from) + 1) % 1440) / 60)) + ":" + pad((toMin(x.from) + 1) % 60);
     r.kunden = (r.kunden || []).concat(k).sort((a, b) => a.from.localeCompare(b.from));
@@ -1728,20 +1856,41 @@ document.addEventListener("submit", e => {
   } else if (f.id === "kdnote-form") {
     const ds = todayDs(), prev = getRec(ds), r = clone(prev || {}), k = (r.kunden || [])[+f.dataset.i];
     if (!k) { closeSheet(); return; }
-    const name = $("kn-name").value.trim(), from = $("kn-from").value, to = $("kn-to").value, err = $("kn-err");
+    const rk = resolveKunde($("kn-name").value), name = rk.name, from = $("kn-from").value, to = $("kn-to").value, err = $("kn-err");
     const fail = m => { err.textContent = m; err.hidden = false; };
-    if (!name) return fail("Bitte den Namen des Kunden eintragen.");
+    if (!name) return fail(rk.nr ? `Kundennummer ${rk.nr} ist noch nicht im Kundenstamm. Bitte „${rk.nr} Name“ eintragen.` : "Bitte Nummer oder Name des Kunden eintragen.");
     if (!from) return fail("Bitte eine Von-Zeit eintragen.");
     if (to && to === from) return fail("Von und Bis sind gleich.");
     if (!to && r.kunden.some((x, j) => j !== +f.dataset.i && x.from && !x.to)) return fail("Es läuft schon ein anderer Kunde. Bitte eine Bis-Zeit eintragen.");
-    k.name = name; k.from = from; if (to) k.to = to; else delete k.to;
+    learnKunde(rk);
+    k.name = name; if (rk.nr) k.nr = rk.nr; else delete k.nr; k.from = from; if (to) k.to = to; else delete k.to;
     const note = $("kn-text").value.trim(); if (note) k.note = note; else delete k.note;
     r.kunden.sort((a, b) => a.from.localeCompare(b.from));
     lastUndo = { ds, prev: clone(prev) };
     setRec(ds, r);
     const mat = $("kn-mat").value.split("\n").map(x => x.trim()).filter(Boolean).join("\n");
-    if (mat !== matOf(name)) setMat(name, mat);
+    if (mat !== matOf(kLabel(k))) setMat(kLabel(k), mat);
     closeSheet(); toast(`${name} gespeichert`, true); render();
+  } else if (f.id === "ks-form") {
+    const nr = $("ks-nr").value.trim().replace(/^#/, ""), name = $("ks-name").value.trim(), old = f.dataset.old, err = $("ks-err");
+    const fail = m => { err.textContent = m; err.hidden = false; };
+    if (!/^\d{1,10}$/.test(nr)) return fail("Die Kundennummer darf nur Ziffern enthalten.");
+    if (!name) return fail("Bitte einen Namen eintragen.");
+    if (nr !== old && kstamm()[nr]) return fail(`Die Nummer ${nr} gehört schon zu ${kstamm()[nr].name}.`);
+    const st = { ...kstamm() }, e = old ? st[old] : null;
+    if (old && old !== nr) delete st[old];
+    const alt = e ? [...new Set([...(e.alt || []), ...(normName(e.name) !== normName(name) ? [e.name] : [])])] : (f.dataset.from && normName(f.dataset.from) !== normName(name) ? [f.dataset.from] : []);
+    st[nr] = { nr, name, alt: alt.filter(a => normName(a) !== normName(name)), at: Date.now() };
+    S.settings.kstamm = st; saveSettings();
+    // Einsätze mit geänderter Nummer mitziehen
+    if (old && old !== nr) for (const mk in S.months) { let ch = false; for (const dd in S.months[mk].days) for (const k of S.months[mk].days[dd].kunden || []) if (k.nr === old) { k.nr = nr; ch = true; } if (ch) { S.months[mk].updatedAt = Date.now(); scheduleRemote("m-" + mk); } }
+    const n = assignNumbers(); saveLocal();
+    toast(`${nr} · ${name} gespeichert${n ? ` · ${n} alte ${n === 1 ? "Eintrag" : "Einträge"} zugeordnet` : ""}`); openKstamm(); render();
+  } else if (f.id === "ksp-form") {
+    const { out, bad } = parseKundenListe($("ksp-text").value), err = $("ksp-err");
+    if (!out.length) { err.textContent = "Keine Zeile erkannt. Bitte „Nummer Name“ pro Zeile."; err.hidden = false; return; }
+    const r = importKunden(out); closeSheet(); render();
+    toast(`${r.neu} neu, ${r.ren} umbenannt${r.zug ? `, ${r.zug} alte Einträge zugeordnet` : ""}${bad.length ? ` · ${bad.length} Zeilen nicht erkannt` : ""}`);
   } else if (f.id === "kp-form") {
     const min = Math.round(Number($("kp-min").value));
     if (!(min >= 1 && min <= 120)) { toast("Bitte 1 bis 120 Minuten eintragen."); return; }
@@ -1837,6 +1986,7 @@ saveLocal();
 setSync("pending");
 // In der Cloud-Version erst nach dem Abgleich abschließen, damit kein älterer Stand neuere Daten überschreibt
 let closedOnce = false;
+assignNumbers();
 if (window.AndroidBridge || window.STEMPELUHR_OFFLINE || !(window.claude && window.claude.use)) { closedOnce = true; closeMonths(); }
 render();
 connect();
