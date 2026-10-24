@@ -189,6 +189,13 @@ button { cursor: pointer; }
 .ytr .ok svg { width: 14px; height: 14px; color: var(--accent); vertical-align: -2px; }
 .yth { font-size: 12px; font-weight: 600; color: var(--muted); padding-top: 0; }
 .kp-row { display: flex; gap: 8px; margin-top: 10px; }
+.std-form { display: grid; gap: 6px; margin-top: 14px; }
+.std-form label { font-weight: 600; }
+.std-row { display: flex; gap: 8px; }
+.std-row input { flex: 1; width: 0; min-width: 0; font-size: 22px; font-weight: 600; text-align: center; padding: 12px; border-radius: 12px; border: 1.5px solid var(--line, #ccc); background: var(--surface); color: var(--ink, inherit); }
+.std-form small { color: var(--muted); }
+.fn-list { display: grid; gap: 0; }
+.fn-list .check { min-height: 40px; font-size: 14.5px; }
 .kp-btn { background: var(--break-soft); border-color: var(--break); }
 .kp-erow { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) 44px; gap: 8px; align-items: end; }
 .kp-erow .icon-btn { width: 44px; height: 46px; }
@@ -375,6 +382,7 @@ const LS_KEY = "stempeluhr.v1";
 const defaultSettings = () => ({
   name: "", persnr: "", firma: "", region: "AT",
   soll: [480, 480, 480, 480, 390, 0, 0], // Mo..So in Minuten
+  erfassung: "zeit", // "stunden": nur Gesamtstunden pro Tag
   modell: "tage", wochenMin: 1800, wochenTage: [1, 1, 1, 1, 1, 0, 0], // modell "woche": Wochenstunden flexibel
   urlaubTage: 25, urlaubRest: 0, startSaldo: 0, startDate: todayDs(), pauseHinweis: true, kpMin: 10, kpAbzug: true, updatedAt: 0,
 });
@@ -590,6 +598,19 @@ function sollBase(ds) {
   return sollWoche()[wd] || 0;
 }
 const isFlex = () => S.settings.modell === "woche";
+const nurStd = () => S.settings.erfassung === "stunden";
+/* Funktionen im Profil ein-/ausblendbar (Standard: alles an). Ausblenden löscht keine Daten. */
+const FUNKTIONEN = { mittag: "Mittagspause stempeln", kaffee: "Kaffeepause", betrieb: "Betrieb einstempeln", kunden: "Kunden", km: "Kilometer", projekt: "Projekt / Kostenstelle", verdienst: "Verdienst im Monat" };
+const on = k => (S.settings.zeigen || {})[k] !== false;
+/* "8", "7,5", "7.25", "7:30" → Minuten (null wenn ungültig) */
+function parseStd(v) {
+  if (typeof v === "number") return v >= 0 && v <= 1440 ? Math.round(v) : null;
+  const t = String(v || "").trim(); let m;
+  if ((m = t.match(/^(\d{1,2}):(\d{2})$/)) && Number(m[2]) < 60) { const x = Number(m[1]) * 60 + Number(m[2]); return x <= 1440 ? x : null; }
+  if ((m = t.match(/^(\d{1,2})(?:[,.](\d{1,2}))?$/))) { const x = Math.round(parseFloat(m[1] + "." + (m[2] || 0)) * 60); return x <= 1440 ? x : null; }
+  return null;
+}
+const stdTxt = v => typeof v === "number" ? String(Math.round(v / 60 * 100) / 100).replace(".", ",") : String(v || "");
 const flexNote = () => { if (!isFlex()) return ""; const d = sollWoche().filter(Boolean); return `Flexible Arbeitszeit: ${hm(S.settings.wochenMin || 0)} Std./Woche ohne fixe Zeiten (Ø ${hm(d.length ? Math.round(S.settings.wochenMin / d.length) : 0)} pro Arbeitstag). Überstunden ergeben sich aus der Monatssumme, die Tagesdifferenz ist nur zur Info.`; };
 const diffHead = () => isFlex() ? "Differenz" : "Überstunden";
 /* Flexibel: Wochenstunden gleichmäßig auf die gewählten Tage verteilt (Restminuten auf die ersten Tage). */
@@ -631,9 +652,12 @@ function calc(ds, rec) {
     if (out != null) state = "done";
   }
   let worked = iv.reduce((s, [a, b]) => s + Math.max(0, b - a), 0);
+  // Nur Gesamtstunden eingetragen (ohne Uhrzeiten): Wert ist bereits reine Arbeitszeit
+  const stdMin = tIn == null && r.std != null ? parseStd(r.std) : null;
+  if (stdMin != null) { worked = stdMin; state = "done"; }
   // Kaffeepausen: feste Minuten je Pause, werden (Einstellung) von der Arbeitszeit abgezogen
   const kp = kpSum(r);
-  if (kp && S.settings.kpAbzug !== false) worked = Math.max(0, worked - kp);
+  if (kp && stdMin == null && S.settings.kpAbzug !== false) worked = Math.max(0, worked - kp);
   let paidAbs = 0, unpaid = 0, arzt = 0;
   for (const a of r.abs || []) {
     const f = toMin(a.from), t = toMin(a.to);
@@ -648,7 +672,7 @@ function calc(ds, rec) {
   if (K.credit === "half") ist += Math.round(soll / 2);
   const counted = (ds < today || (isToday && (state === "done" || (!!rec && kind !== "arbeit" && tIn == null)))) && (!!rec || ds >= S.settings.startDate);
   const missing = counted && !rec && soll > 0 && ds < today;
-  return { ds, kind, K, hol, soll, ist, worked, brk, kp, paidAbs, unpaid, arzt, saldo: ist - soll, state, incomplete, counted, missing, rec: r };
+  return { ds, kind, K, hol, soll, ist, worked, brk, kp, paidAbs, unpaid, arzt, saldo: ist - soll, state, incomplete, counted, missing, rec: r, std: stdMin != null };
 }
 
 function monthDays(mk) { const n = daysInMonth(mk), out = []; for (let i = 1; i <= n; i++) out.push(`${mk}-${pad(i)}`); return out; }
@@ -738,13 +762,14 @@ const ICON = {
 function nextStep(r) {
   if (!r.in) return "in";
   if (r.out) return null;
+  if (!r.ls && !on("mittag")) return "out";
   if (!r.ls) return "ls";
   if (!r.le) return "le";
   return "out";
 }
 function viewHeute() {
   const ds = todayDs(), d = new Date(), c = calc(ds), r = c.rec, step = nextStep(r);
-  const statusTxt = c.state === "work" ? `Bei der Arbeit seit ${r.le || r.in}` : c.state === "pause" ? `Mittagspause seit ${r.ls}` : c.state === "done" ? `Feierabend um ${r.out}` : "Nicht eingestempelt";
+  const statusTxt = nurStd() && !r.in ? (c.std ? `Heute eingetragen: ${hm(c.worked)} h` : "Noch keine Stunden eingetragen") : c.state === "work" ? `Bei der Arbeit seit ${r.le || r.in}` : c.state === "pause" ? `Mittagspause seit ${r.ls}` : c.state === "done" ? `Feierabend um ${r.out}` : "Nicht eingestempelt";
   const stCls = c.state === "work" ? "work" : c.state === "pause" ? "pause" : "";
   let big;
   if (step === "in") big = `<button class="big-btn" data-act="stamp" data-k="in">${ICON.play} Arbeitsbeginn</button>`;
@@ -753,9 +778,9 @@ function viewHeute() {
   else if (step === "out") big = `<button class="big-btn end" data-act="stamp" data-k="out">${ICON.stop} Arbeitsende</button>`;
   else big = `<button class="big-btn done" data-act="edit" data-ds="${ds}">${ICON.check} Arbeitstag abgeschlossen · Korrigieren</button>`;
   const secondary = step === "ls" ? `<div class="btn-row"><button class="btn grow" data-act="stamp" data-k="out">Ohne Mittagspause beenden</button></div>` : "";
-  const kpBtn = c.state === "work" ? `<div class="kp-row"><button class="btn grow kp-btn" data-act="kpadd">☕ Kaffeepause ${kpDefault()} Min.</button><button class="btn" data-act="kpmore" aria-label="Andere Dauer">Dauer</button></div>` : "";
+  const kpBtn = c.state === "work" && on("kaffee") ? `<div class="kp-row"><button class="btn grow kp-btn" data-act="kpadd">☕ Kaffeepause ${kpDefault()} Min.</button><button class="btn" data-act="kpmore" aria-label="Andere Dauer">Dauer</button></div>` : "";
   const kpToday = (r.kp || []).map(k => `<span class="chip k-warn">☕ ${esc(k.at || "")} · ${k.min} Min.</span>`).join(" ");
-  const stamps = ["in", "ls", "le", "out"].map(k => `<button class="stamp ${r[k] ? "set" : ""} ${k === step ? "next" : ""}" data-act="edit" data-ds="${ds}" aria-label="${STAMP_LABELS[k]} ${r[k] || "nicht gestempelt"}"><span>${STAMP_SHORT[k]}</span><b>${r[k] || "––:––"}</b></button>`).join("");
+  const stamps = ["in", "ls", "le", "out"].filter(k => on("mittag") || r.ls || r.le || k === "in" || k === "out").map(k => `<button class="stamp ${r[k] ? "set" : ""} ${k === step ? "next" : ""}" data-act="edit" data-ds="${ds}" aria-label="${STAMP_LABELS[k]} ${r[k] || "nicht gestempelt"}"><span>${STAMP_SHORT[k]}</span><b>${r[k] || "––:––"}</b></button>`).join("");
 
   // Woche
   const wd = (d.getDay() + 6) % 7; let wIst = 0, wSoll = 0;
@@ -763,7 +788,7 @@ function viewHeute() {
   const saldo = totalSaldo();
   const kindChip = c.kind !== "arbeit" ? `<span class="chip ${c.K.cls}">${esc(c.hol && c.kind === "feiertag" ? c.hol : c.K.label)}</span>` : "";
   let warn = "";
-  if (S.settings.pauseHinweis && c.worked > 360 && c.brk < 30 && c.state !== "pause") warn = `<div class="note">Mehr als 6 Stunden ohne 30 Minuten Pause. Gesetzlich ist ab 6 Stunden Arbeitszeit eine Ruhepause von mindestens 30 Minuten vorgeschrieben.</div>`;
+  if (S.settings.pauseHinweis && !c.std && c.worked > 360 && c.brk < 30 && c.state !== "pause") warn = `<div class="note">Mehr als 6 Stunden ohne 30 Minuten Pause. Gesetzlich ist ab 6 Stunden Arbeitszeit eine Ruhepause von mindestens 30 Minuten vorgeschrieben.</div>`;
   const kd = r.kunden || [], kdRun = kd.findIndex(k => k.from && !k.to);
   const kundenCard = `<section class="card">
     <div class="row"><h2 style="margin:0">Kunden heute</h2>${kd.length ? `<span class="num" style="color:var(--muted);font-size:13px">${hm(kd.reduce((a, k) => a + kdMin(k, ds), 0))} h</span>` : ""}</div>
@@ -778,9 +803,13 @@ function viewHeute() {
     <div class="row"><div class="clock-date">${WD_LONG[d.getDay()]}, ${d.getDate()}. ${(S.settings.region === "DE" ? MONTHS_DE : MONTHS)[d.getMonth()]} ${d.getFullYear()}</div>${kindChip}</div>
     <div class="clock" id="clock">${pad(d.getHours())}:${pad(d.getMinutes())}<span class="sec">${pad(d.getSeconds())}</span></div>
     <div class="status ${stCls}"><i></i>${statusTxt}</div>
-    ${big}${secondary}${kpBtn}
-    <div class="stamps">${stamps}</div>
+    ${nurStd() && !r.in ? `<form class="std-form" id="std-form">
+      <label for="h-std">Gesamtstunden heute</label>
+      <div class="std-row"><input id="h-std" inputmode="decimal" autocomplete="off" placeholder="z. B. 8 oder 7,5" value="${esc(r.std != null ? stdTxt(r.std) : "")}"><button class="btn primary" type="submit">Speichern</button></div>
+      <small>Reine Arbeitszeit ohne Pausen. Auch 7:30 geht.</small><p class="err" id="h-err" hidden></p></form>` : `${big}${secondary}${kpBtn}
+    <div class="stamps">${stamps}</div>`}
     ${(() => { const bRun = (r.kunden || []).find(k => isBetr(k) && k.from && !k.to), bMin = betrMin(r, ds);
+      if (!on("betrieb") && !bRun && !bMin) return "";
       return `<button class="stamp-betr ${bRun ? "run" : bMin ? "set" : ""}" data-act="betrieb"><span>🏭 Betrieb</span><b>${bRun ? `seit ${esc(bRun.from)}` : bMin ? `${hm(bMin)} h heute` : "einstempeln"}</b><small>${bRun ? "Tippen zum Ausstempeln" : "Zeit in der Firma, z. B. Vorbereitung"}</small></button>`; })()}
     ${absToday || kpToday ? `<div class="btn-row">${absToday} ${kpToday}</div>` : ""}
   </section>
@@ -790,17 +819,17 @@ function viewHeute() {
       <p class="hint" style="margin:0 0 10px">Die Ergebnisse sind gespeichert. Der neue Monat beginnt am 1. wieder bei null.</p>
       <dl class="kv"><dt>Arbeitszeit</dt><dd>${hm(c.worked)} h</dd><dt>Saldo Monat</dt><dd class="${c.saldo >= 0 ? "pos" : "neg"}">${hmSigned(c.saldo)}</dd>${c.verdienst ? `<dt>Verdienst (brutto)</dt><dd>${eur(c.verdienst.sum)}</dd>` : ""}</dl>
       <div class="btn-row" style="margin-top:12px"><button class="btn primary grow" data-act="closedcsv">${ICON.dl} CSV sichern</button><button class="btn grow" data-act="closedok">OK</button></div></section>`; })()}
-  ${kundenCard}
+  ${on("kunden") || kd.length ? kundenCard : ""}
   <section class="tiles">
     <div class="tile"><span>Arbeitszeit heute</span><b>${hm(c.worked + c.paidAbs - c.unpaid)}</b><small>${isFlex() ? "flexibel, Ø" : "Soll"} ${hm(c.soll)}</small></div>
-    <div class="tile"><span>Pause heute</span><b>${hm(c.brk + c.kp)}</b><small>${c.kp ? `davon Kaffee ${c.kp} Min.` : c.brk >= 30 || c.worked <= 360 ? "in Ordnung" : "unter 30 Min."}</small></div>
+    ${c.std ? `<div class="tile"><span>Kunden heute</span><b>${hm(kd.reduce((a, k) => a + kdMin(k, ds), 0))}</b><small>${kd.length} Einsätze</small></div>` : `<div class="tile"><span>Pause heute</span><b>${hm(c.brk + c.kp)}</b><small>${c.kp ? `davon Kaffee ${c.kp} Min.` : c.brk >= 30 || c.worked <= 360 ? "in Ordnung" : "unter 30 Min."}</small></div>`}
     <div class="tile"><span>Diese Woche</span><b>${hm(wIst)}</b><small>von ${hm(wSoll)} Soll</small></div>
     <div class="tile"><span>Zeitkonto gesamt</span><b class="${saldo >= 0 ? "pos" : "neg"}">${hmSigned(saldo)}</b><small>${c.state === "work" || c.state === "pause" ? "ohne laufenden Tag" : "Gleitzeit-Saldo"}</small></div>
   </section>
   <section class="quick" aria-label="Schnellaktionen">
     <button data-act="partial" data-ds="${ds}">${ICON.steth}Arztbesuch</button>
     <button data-act="tab" data-tab="abw">${ICON.cal}Urlaub / Krank</button>
-    <button data-act="kpnach"><span class="qi">☕</span>Kaffee nachtragen</button>
+    ${on("kaffee") && !nurStd() ? `<button data-act="kpnach"><span class="qi">☕</span>Kaffee nachtragen</button>` : ""}
     <button data-act="edit" data-ds="${ds}">${ICON.pen}Tag bearbeiten</button>
   </section>`;
 }
@@ -808,7 +837,7 @@ function viewHeute() {
 /* ---------- Ansicht: Monat ---------- */
 function dayTimes(c) {
   const r = c.rec;
-  if (!r.in) return "";
+  if (!r.in) return c.std ? `${hm(c.worked)} h eingetragen` : "";
   let s = `${r.in}–${r.out || (c.ds === todayDs() ? "läuft" : "?")}`;
   if (r.ls) s += ` · Pause ${r.le ? hm(c.brk) : "offen"}`;
   return s;
@@ -876,7 +905,7 @@ function viewMonat() {
   </section>
   ${(() => { const cs = customerStats(mk); return cs.length ? `<section class="card"><h2>Kunden im ${MONTHS[+mk.slice(5) - 1]}</h2><dl class="kv">${cs.map(e => `<dt>${esc(e.label)} <small style="color:var(--muted)">· ${e.n} ${e.n === 1 ? "Einsatz" : "Einsätze"}</small></dt><dd>${hm(e.min)} h</dd>`).join("")}</dl></section>` : ""; })()}
   <section class="days" aria-label="Tage">${rows}</section>
-  ${(() => { const e = earn(t); return `<section class="card earn">
+  ${(() => { if (!on("verdienst")) return ""; const e = earn(t); return `<section class="card earn">
     <h2>Verdienst im ${MONTHS[+mk.slice(5) - 1]}</h2>
     <div class="grid2">
       <div class="field"><label for="m-rate">Betrag pro Stunde (€)</label><input id="m-rate" inputmode="decimal" autocomplete="off" placeholder="z. B. 18,50" value="${esc(String(rateStr(e.basis)).replace(".", ","))}"></div>
@@ -1076,6 +1105,12 @@ function viewProfil() {
         <div class="field"><label for="p-persnr">Personalnummer</label><input id="p-persnr" value="${esc(s.persnr)}"></div>
         <div class="field"><label for="p-firma">Firma / Abteilung</label><input id="p-firma" value="${esc(s.firma)}"></div>
       </div>
+      <div class="lbl" style="margin-top:6px">So willst du eintragen</div>
+      <div class="field"><label for="p-erf">Erfassungsart</label>
+        <select id="p-erf"><option value="zeit" ${!nurStd() ? "selected" : ""}>Stempeln mit Uhrzeiten (von–bis)</option><option value="stunden" ${nurStd() ? "selected" : ""}>Nur Gesamtstunden pro Tag</option></select></div>
+      <div class="lbl">Diese Funktionen anzeigen</div>
+      <div class="fn-list">${Object.entries(FUNKTIONEN).map(([k, l]) => `<label class="check"><input type="checkbox" id="p-fn-${k}" ${on(k) ? "checked" : ""}> ${esc(l)}</label>`).join("")}</div>
+      <p class="sub" style="margin:0">Ausgeblendetes wird nur versteckt. Bereits eingetragene Daten bleiben erhalten und stehen weiter in den Berichten.</p>
       <div class="field"><label for="p-modell">Arbeitszeitmodell</label>
         <select id="p-modell"><option value="tage" ${!flex ? "selected" : ""}>Feste Stunden pro Wochentag</option><option value="woche" ${flex ? "selected" : ""}>Wochenstunden flexibel</option></select></div>
       <div id="p-tage" ${flex ? "hidden" : ""}>
@@ -1170,27 +1205,27 @@ function renderEditor(err) {
         <div class="field"><label for="e-kind">Art des Tages</label><select id="e-kind" data-f="kind">${kinds}</select></div>
         <div class="field"><label for="e-ort">Arbeitsort</label><select id="e-ort" data-f="ort">${orte}</select></div>
       </div>
-      <div class="lbl">Stempelzeiten</div>
-      <div class="grid4">
-        ${["in", "ls", "le", "out"].map(k => `<div class="field"><label for="e-${k}">${STAMP_LABELS[k]}</label><input type="time" id="e-${k}" data-f="${k}" value="${esc(rec[k] || "")}"></div>`).join("")}
-      </div>
-      <div class="kd-tbl">
+      ${(nurStd() || rec.std != null) && !rec.in ? `<div class="field"><label for="e-std">Gesamtstunden (reine Arbeitszeit)</label><input id="e-std" data-f="std" inputmode="decimal" autocomplete="off" placeholder="z. B. 8 oder 7,5" value="${esc(rec.std != null ? stdTxt(rec.std) : "")}"></div>` : ""}
+      ${nurStd() && !rec.in ? "" : `<div class="lbl">Stempelzeiten</div>
+      <div class="${on("mittag") || rec.ls || rec.le ? "grid4" : "grid2"}">
+        ${["in", "ls", "le", "out"].filter(k => on("mittag") || rec.ls || rec.le || k === "in" || k === "out").map(k => `<div class="field"><label for="e-${k}">${STAMP_LABELS[k]}</label><input type="time" id="e-${k}" data-f="${k}" value="${esc(rec[k] || "")}"></div>`).join("")}
+      </div>`}
+      ${on("kunden") || rec.kunden.length ? `<div class="kd-tbl">
         <div class="kd-cap"><b>Kunden${rec.kunden.length ? `<small>${rec.kunden.length} · ${hm(kdTot)} h</small>` : ""}</b><button type="button" class="kd-plus" data-act="kdrowadd" aria-label="Kunde hinzufügen">+</button></div>
         ${rec.kunden.length ? `<div class="kd-tr kd-th"><span>Kunde</span><span>Von</span><span>Bis</span><span></span></div>${kdRows}` : '<div class="kd-empty">Noch keine Kunden. Mit + eine Zeile hinzufügen.</div>'}
-      </div>
-      <div class="lbl">Kaffeepausen${S.settings.kpAbzug !== false ? " (werden von der Arbeitszeit abgezogen)" : " (zählen als Arbeitszeit)"}</div>
+      </div>` : ""}
+      ${(on("kaffee") && !(nurStd() && !rec.in)) || rec.kp.length ? `<div class="lbl">Kaffeepausen${S.settings.kpAbzug !== false ? " (werden von der Arbeitszeit abgezogen)" : " (zählen als Arbeitszeit)"}</div>
       ${rec.kp.map((k, i) => `<div class="kp-erow">
         <div class="field"><label for="e-kpa${i}">Uhrzeit</label><input type="time" id="e-kpa${i}" data-kp="${i}" data-f="at" value="${esc(k.at || "")}"></div>
         <div class="field"><label for="e-kpm${i}">Minuten</label><input type="number" inputmode="numeric" min="1" max="120" id="e-kpm${i}" data-kp="${i}" data-f="min" value="${esc(k.min)}"></div>
         <button type="button" class="icon-btn" data-act="kprowdel" data-i="${i}" aria-label="Entfernen">${ICON.x}</button></div>`).join("") || '<p class="hint">Keine.</p>'}
-      <button type="button" class="btn" data-act="kprowadd">+ Kaffeepause</button>
+      <button type="button" class="btn" data-act="kprowadd">+ Kaffeepause</button>` : ""}
       <div class="lbl">Stundenweise Abwesenheit (Arzt, Behörde …)</div>
       ${abs || '<p class="hint">Keine.</p>'}
       <button type="button" class="btn" data-act="absadd">+ Arztbesuch / Abwesenheit hinzufügen</button>
-      <div class="grid2">
-        <div class="field"><label for="e-km">Kilometer (Dienstfahrt)</label><input type="number" inputmode="decimal" min="0" step="0.1" id="e-km" data-f="km" value="${esc(rec.km || "")}"></div>
-        <div class="field"><label for="e-proj">Projekt / Kostenstelle</label><input id="e-proj" data-f="projekt" value="${esc(rec.projekt || "")}"></div>
-      </div>
+      ${(() => { const f = [on("km") || rec.km ? `<div class="field"><label for="e-km">Kilometer (Dienstfahrt)</label><input type="number" inputmode="decimal" min="0" step="0.1" id="e-km" data-f="km" value="${esc(rec.km || "")}"></div>` : "",
+        on("projekt") || rec.projekt ? `<div class="field"><label for="e-proj">Projekt / Kostenstelle</label><input id="e-proj" data-f="projekt" value="${esc(rec.projekt || "")}"></div>` : ""].filter(Boolean);
+        return f.length ? `<div class="grid2">${f.join("")}</div>` : ""; })()}
       <div class="field"><label for="e-note">Notiz</label><textarea id="e-note" data-f="note" placeholder="z. B. Baustelle Linz, Überstunden angeordnet von …">${esc(rec.note || "")}</textarea></div>
       <label class="check"><input type="checkbox" id="e-beleg" data-f="beleg" ${rec.beleg ? "checked" : ""}> Bestätigung / Beleg vorhanden${K.beleg ? " (Krankmeldung, Arztbestätigung …)" : ""}</label>
       ${err ? `<div class="err">${esc(err)}</div>` : ""}
@@ -1213,6 +1248,8 @@ function readDraftInputs() {
 }
 function validateRec(r) {
   const t = k => toMin(r[k]);
+  if (r.stdBad != null) return "Gesamtstunden bitte als Zahl eintragen, z. B. 8, 7,5 oder 7:30 (höchstens 24).";
+  if (r.std != null && r.in) return "Bitte entweder Uhrzeiten oder Gesamtstunden eintragen, nicht beides.";
   if ((r.ls || r.le || r.out) && !r.in) return "Bitte zuerst den Arbeitsbeginn eintragen.";
   if (r.le && !r.ls) return "Mittag Ende braucht auch einen Mittag Anfang.";
   if (r.ls && t("ls") < t("in")) return "Mittag Anfang liegt vor dem Arbeitsbeginn.";
@@ -1237,6 +1274,7 @@ function cleanRec(r) {
         .filter(x => x.name || x.from || x.to).sort((a, b) => (a.from || "").localeCompare(b.from || ""));
       if (ks.length) out.kunden = ks; continue;
     }
+    if (k === "std") { const m = parseStd(v); if (m != null) out.std = m; else if (String(v).trim()) out.stdBad = String(v); continue; }
     if (v === "" || v === false || v == null) continue;
     out[k] = k === "km" ? Number(v) : v;
   }
@@ -1861,6 +1899,14 @@ document.addEventListener("click", async e => {
 document.addEventListener("submit", e => {
   e.preventDefault();
   const f = e.target;
+  if (f.id === "std-form") {
+    const ds = todayDs(), txt = $("h-std").value.trim(), m = parseStd(txt), errEl = $("h-err");
+    const prev = getRec(ds), rec = prev ? clone(prev) : { kind: holidayName(ds) ? "feiertag" : "arbeit" };
+    if (txt && m == null) { errEl.textContent = "Bitte als Zahl eintragen, z. B. 8, 7,5 oder 7:30 (höchstens 24)."; errEl.hidden = false; return; }
+    if (m == null) delete rec.std; else { rec.std = m; if (rec.kind !== "arbeit" && !rec.in) rec.kind = "arbeit"; }
+    setRec(ds, isEmptyRec(rec, ds) ? null : rec); lastUndo = { ds, prev: prev ? clone(prev) : null };
+    toast(m == null ? "Stunden entfernt." : `${hm(m)} h für heute gespeichert.`, true); render(); return;
+  }
   if (f.id === "edit-form") {
     readDraftInputs();
     const r = cleanRec(draft.rec), err = validateRec(r);
@@ -1966,6 +2012,8 @@ document.addEventListener("submit", e => {
     s.name = $("p-name").value.trim(); s.persnr = $("p-persnr").value.trim(); s.firma = $("p-firma").value.trim();
     s.soll = [0, 1, 2, 3, 4, 5, 6].map(i => toMin($("p-soll" + i).value) || 0);
     s.modell = $("p-modell").value;
+    s.erfassung = $("p-erf").value;
+    s.zeigen = Object.fromEntries(Object.keys(FUNKTIONEN).map(k => [k, $("p-fn-" + k).checked]));
     if (s.modell === "woche") {
       const wTxt = $("p-wstd").value.trim(), wm = wTxt.match(/^(\d{1,3})(?::(\d{1,2}))?$/) || wTxt.match(/^(\d{1,3})[,.](\d{1,2})$/);
       if (!wm) { errEl.textContent = "Stunden pro Woche bitte als Zahl eingeben, z. B. 30 oder 38,5."; errEl.hidden = false; return; }
