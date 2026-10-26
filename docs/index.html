@@ -1535,6 +1535,27 @@ function dayRemark(c) {
   if (c.missing) out.push("keine Zeiten");
   return out.join(", ");
 }
+/* Kundeneinsätze eines Monats (ohne Betrieb) für Stundenaufzeichnung */
+function kundenEinsaetze(mk) {
+  const out = [];
+  for (const ds of monthDays(mk)) for (const k of ((getRec(ds) || {}).kunden || []).filter(k => !isBetr(k)))
+    out.push({ ds, nr: k.nr || "", name: kCurName(k), from: k.from || "", to: k.to || "", min: kdMin(k, ds), note: k.note || "" });
+  return out.sort((a, b) => a.ds.localeCompare(b.ds) || a.from.localeCompare(b.from));
+}
+const nwRemark = c => [((c.rec.kunden || []).filter(k => !isBetr(k)).map(k => kCurName(k)).filter((n, i, a) => n && a.indexOf(n) === i).join(", ")), dayRemark(c)].filter(Boolean).join(" · ");
+function buildNachweisKunden(mk) {
+  const ks = kundenEinsaetze(mk); if (!ks.length) return "";
+  const cs = customerStats(mk), tot = ks.reduce((a, k) => a + k.min, 0);
+  return `<div class="nw-p2">
+  <div class="nw-head"><div><h1>Kundeneinsätze ${esc(monthName(mk, S.settings.region))}</h1><p>${esc(S.settings.name || "")}</p></div><p class="small">Wann, wo und wie lange</p></div>
+  <table class="nw-t nw-k"><thead><tr><th>Datum</th><th>Tag</th><th>Kd.-Nr.</th><th>Kunde</th><th>Von</th><th>Bis</th><th>Dauer</th><th>Was gemacht / Notiz</th></tr></thead>
+  <tbody>${ks.map(k => { const d = parseDs(k.ds); return `<tr><td>${pad(d.getDate())}.${pad(d.getMonth() + 1)}.</td><td>${WD[d.getDay()]}</td><td>${esc(k.nr)}</td><td class="kn">${esc(k.name)}</td><td>${esc(k.from)}</td><td>${esc(k.to)}</td><td><b>${k.min ? hm(k.min) : ""}</b></td><td class="bem">${esc(k.note)}</td></tr>`; }).join("")}</tbody>
+  <tfoot><tr><td colspan="6">Summe ${ks.length} Einsätze</td><td>${hm(tot)}</td><td></td></tr></tfoot></table>
+  <h2 class="nw-h2">Summe je Kunde</h2>
+  <table class="nw-t nw-ks"><thead><tr><th>Kd.-Nr.</th><th>Kunde</th><th>Einsätze</th><th>Stunden</th><th>Dezimal</th></tr></thead>
+  <tbody>${cs.map(e => `<tr><td>${esc(e.nr)}</td><td class="kn">${esc(e.name)}</td><td>${e.n}</td><td><b>${hm(e.min)}</b></td><td>${dec(e.min)}</td></tr>`).join("")}</tbody></table>
+</div>`;
+}
 function buildNachweis(mk) {
   const s = S.settings, t = monthStats(mk), ub = monthCarry(mk), today = todayDs();
   const h = m => m ? hm(m) : "";
@@ -1543,7 +1564,7 @@ function buildNachweis(mk) {
     const c = calc(ds), r = c.rec, d = parseDs(ds), we = d.getDay() === 0 || d.getDay() === 6;
     const diff = c.counted && (c.saldo || c.ist) ? c.saldo : 0;
     return `<tr class="${we ? "we" : ""} ${c.kind !== "arbeit" ? "abs" : ""}"><td>${pad(d.getDate())}.${pad(d.getMonth() + 1)}.</td><td>${WD[d.getDay()]}</td><td>${esc(r.in || "")}</td><td>${esc(r.out || "")}</td>
-      <td>${h(c.brk + c.kp)}</td><td><b>${h(c.worked)}</b></td><td>${h(betrMin(r, ds))}</td><td>${h(c.soll)}</td><td>${c.counted ? h(c.ist) : ""}</td><td class="${diff > 0 ? "plus" : diff < 0 ? "minus" : ""}">${sg(diff)}</td><td class="bem">${esc(dayRemark(c))}</td></tr>`;
+      <td>${h(c.brk + c.kp)}</td><td><b>${h(c.worked)}</b></td><td>${h(betrMin(r, ds))}</td><td>${h(c.soll)}</td><td>${c.counted ? h(c.ist) : ""}</td><td class="${diff > 0 ? "plus" : diff < 0 ? "minus" : ""}">${sg(diff)}</td><td class="bem">${esc(nwRemark(c))}</td></tr>`;
   }).join("");
   const ueRate = rateNum("ueber");
   const asOf = lastDayOf(mk) < `${mk}-${pad(daysInMonth(mk))}` ? `Stand ${fmtDate(Date.now())} (Monat läuft noch)` : "";
@@ -1569,6 +1590,7 @@ function buildNachweis(mk) {
     <p class="small">Urlaub ${String(t.urlaub).replace(".", ",")} Tage · Krankenstand ${t.krank} Tage · Arztbesuche ${hm(t.arzt)} h${t.kpN ? ` · Kaffeepausen ${t.kpN}× (${S.settings.kpAbzug !== false ? "abgezogen" : "bezahlt"})` : ""}${t.km ? ` · ${String(t.km).replace(".", ",")} km` : ""}</p>
   </div>
   <div class="nw-sign"><div>Datum, Unterschrift Mitarbeiter</div><div>Datum, Unterschrift Arbeitgeber</div></div></div>
+  ${on("kunden") || kundenEinsaetze(mk).length ? buildNachweisKunden(mk) : ""}
 </div>`;
 }
 const NW_CSS = `.nw{font:10.5pt/1.35 system-ui,Arial,sans-serif;color:#111;background:#fff}
@@ -1586,6 +1608,9 @@ const NW_CSS = `.nw{font:10.5pt/1.35 system-ui,Arial,sans-serif;color:#111;backg
 .nw-sum{display:grid;gap:4px}.nw-sum table{border-collapse:collapse;font-size:9pt;max-width:520px}
 .nw-sum td{padding:1px 14px 1px 0;white-space:nowrap}.nw-sum td:first-child{white-space:normal}.nw-sum td:nth-child(n+2){text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
 .nw-sum td.dec{color:#666;font-weight:400}.nw-sum tr.big td{font-size:11pt;font-weight:800;border-top:1px solid #111;border-bottom:1px solid #111;padding:2px 10px 2px 0}
+.nw-p2{break-before:page;page-break-before:always;margin-top:28px}@media print{.nw-p2{margin-top:0}}
+.nw-h2{font-size:11pt;margin:14px 0 4px}
+.nw-k td.kn,.nw-ks td.kn{white-space:normal;font-weight:600}.nw-k td.bem{width:34%}.nw-ks{width:auto;min-width:60%}
 .nw-sign{display:grid;grid-template-columns:1fr 1fr;gap:40px;padding-bottom:2px}.nw-sign div{border-top:1px solid #111;padding-top:3px;font-size:8.5pt;color:#555}`;
 function openNachweis(mk) {
   const root = $("print-root");
@@ -1603,52 +1628,108 @@ function nachweisFile(mk) {
 
 /* ---------- Stundenaufzeichnung als Bild (PNG) zum Weiterschicken ---------- */
 function nachweisPng(mk) {
+  // A4 Hochformat (210 × 297 mm) mit Rand, damit das Bild beim Ausdrucken nicht abgeschnitten wird
   const s = S.settings, t = monthStats(mk), ub = monthCarry(mk), days = monthDays(mk);
-  const W = 1500, RH = 34, top = 130, headH = 42, sumH = 300;
-  const H = top + headH + days.length * RH + RH + sumH + (isFlex() ? 30 : 0);
-  const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+  const W = 1240, H = 1754, L = 70, R = W - 70, SC = 2;
+  const cv = document.createElement("canvas"); cv.width = W * SC; cv.height = H * SC;
   const g = cv.getContext("2d"), F = (w, px) => `${w} ${px}px Arial, "Helvetica Neue", sans-serif`;
-  g.fillStyle = "#fff"; g.fillRect(0, 0, W, H); g.textBaseline = "middle";
+  g.scale(SC, SC); g.fillStyle = "#fff"; g.fillRect(0, 0, W, H); g.textBaseline = "middle";
   const GREEN = "#0E6B57", RED = "#B3261E", GRAY = "#555";
-  g.fillStyle = "#111"; g.font = F(700, 38); g.fillText(`Stundenaufzeichnung ${monthName(mk, s.region)}`, 40, 52);
-  g.font = F(400, 24); g.fillStyle = GRAY;
-  g.fillText([s.name || "Name: ______________", s.persnr ? "Pers.-Nr. " + s.persnr : "", s.firma].filter(Boolean).join("  ·  "), 40, 96);
+  const fit = (txt, maxW) => { if (g.measureText(txt).width <= maxW) return txt; let x = txt; while (x.length > 3 && g.measureText(x + "…").width > maxW) x = x.slice(0, -1); return x + "…"; };
+  g.fillStyle = "#111"; g.font = F(700, 30); g.fillText(`Stundenaufzeichnung ${monthName(mk, s.region)}`, L, 86);
+  g.font = F(400, 17); g.fillStyle = GRAY;
   const asOf = lastDayOf(mk) < `${mk}-${pad(daysInMonth(mk))}` ? `Stand ${fmtDate(Date.now())} (Monat läuft noch)` : `Erstellt am ${fmtDate(Date.now())}`;
-  g.textAlign = "right"; g.fillText(asOf, W - 40, 96); g.textAlign = "left";
-  g.fillStyle = GREEN; g.fillRect(40, 116, W - 80, 4);
-  const cols = [["Datum", 40, "l"], ["Tag", 150, "l"], ["Beginn", 290, "r"], ["Ende", 390, "r"], ["Pause", 490, "r"], ["Arbeit", 610, "r"], ["Betrieb", 730, "r"], ["Soll", 840, "r"], ["Ist", 950, "r"], [isFlex() ? "Differenz" : "Überstd.", 1090, "r"], ["Bemerkung", 1120, "l"]];
-  const cell = (txt, i, y, color = "#111", w = 400) => { const [, x, a] = cols[i]; g.textAlign = a === "r" ? "right" : "left"; g.fillStyle = color; g.fillText(txt, x, y); };
-  let y = top; g.fillStyle = GREEN; g.fillRect(40, y, W - 80, headH); g.font = F(700, 21);
+  g.textAlign = "right"; g.fillText(asOf, R, 120); const asW = g.measureText(asOf).width; g.textAlign = "left";
+  g.fillText(fit([s.name || "Name: ______________", s.persnr ? "Pers.-Nr. " + s.persnr : "", s.firma].filter(Boolean).join("  ·  "), R - L - asW - 20), L, 120);
+  g.fillStyle = GREEN; g.fillRect(L, 136, R - L, 3);
+  let y = 150;
+  if (isFlex()) { g.font = F(400, 14); g.fillStyle = GRAY; g.fillText(fit(flexNote(), R - L), L, y + 8); y += 22; }
+  const cols = [["Datum", L + 4, "l"], ["Tag", L + 74, "l"], ["Beginn", L + 182, "r"], ["Ende", L + 256, "r"], ["Pause", L + 326, "r"], ["Arbeit", L + 408, "r"], ["Betrieb", L + 490, "r"], ["Soll", L + 562, "r"], ["Ist", L + 640, "r"], [isFlex() ? "Differenz" : "Überstd.", L + 730, "r"], ["Bemerkung", L + 748, "l"]];
+  const remW = R - (L + 748) - 4;
+  const cell = (txt, i, yy, color = "#111") => { const [, x, a] = cols[i]; g.textAlign = a === "r" ? "right" : "left"; g.fillStyle = color; g.fillText(txt, x, yy); };
+  const headH = 30, bottom = 400, RH = Math.min(32, Math.floor((H - 60 - bottom - y - headH) / (days.length + 1)));
+  g.fillStyle = GREEN; g.fillRect(L, y, R - L, headH); g.font = F(700, 15);
   cols.forEach((c, i) => cell(c[0], i, y + headH / 2, "#fff")); y += headH;
   for (const ds of days) {
     const c = calc(ds), r = c.rec, d = parseDs(ds), we = d.getDay() === 0 || d.getDay() === 6;
-    if (we) { g.fillStyle = "#F0F0F0"; g.fillRect(40, y, W - 80, RH); }
-    g.fillStyle = "#DDD"; g.fillRect(40, y + RH - 1, W - 80, 1);
+    if (we) { g.fillStyle = "#F0F0F0"; g.fillRect(L, y, R - L, RH); }
+    g.fillStyle = "#DDD"; g.fillRect(L, y + RH - 1, R - L, 1);
     const m = y + RH / 2, diff = c.counted && (c.saldo || c.ist) ? c.saldo : 0, b = betrMin(r, ds);
-    g.font = F(400, 21);
+    g.font = F(400, 16);
     cell(`${pad(d.getDate())}.${pad(d.getMonth() + 1)}.`, 0, m); cell(WD[d.getDay()], 1, m); cell(r.in || "", 2, m); cell(r.out || "", 3, m);
-    cell(c.brk + c.kp ? hm(c.brk + c.kp) : "", 4, m); g.font = F(700, 21); cell(c.worked ? hm(c.worked) : "", 5, m); g.font = F(400, 21);
+    cell(c.brk + c.kp ? hm(c.brk + c.kp) : "", 4, m); g.font = F(700, 16); cell(c.worked ? hm(c.worked) : "", 5, m); g.font = F(400, 16);
     cell(b ? hm(b) : "", 6, m); cell(c.soll ? hm(c.soll) : "", 7, m); cell(c.counted && c.ist ? hm(c.ist) : "", 8, m);
-    if (diff) { g.font = F(700, 21); cell(hmSigned(diff), 9, m, diff > 0 ? GREEN : RED); }
-    const rem = dayRemark(c); if (rem) { g.font = F(c.kind !== "arbeit" ? 700 : 400, 18); let tx = rem; while (g.measureText(tx).width > W - 40 - 1120 && tx.length > 3) tx = tx.slice(0, -2); cell(tx === rem ? rem : tx + "…", 10, m, c.kind !== "arbeit" ? GREEN : GRAY); }
+    if (diff) { g.font = F(700, 16); cell(hmSigned(diff), 9, m, diff > 0 ? GREEN : RED); }
+    const rem = nwRemark(c); if (rem) { g.font = F(c.kind !== "arbeit" ? 700 : 400, 13.5); cell(fit(rem, remW), 10, m, c.kind !== "arbeit" ? GREEN : GRAY); }
     y += RH;
   }
-  g.fillStyle = "#111"; g.fillRect(40, y, W - 80, 3); const m = y + RH / 2 + 2; g.font = F(700, 22);
+  g.fillStyle = "#111"; g.fillRect(L, y, R - L, 2); const m = y + RH / 2 + 2; g.font = F(700, 16);
   cell("Summe", 0, m); cell(hm(t.brk + t.kp), 4, m); cell(hm(t.worked), 5, m); cell(t.betr ? hm(t.betr) : "", 6, m); cell(hm(t.soll), 7, m); cell(hm(t.ist), 8, m); cell(hmSigned(t.saldo), 9, m, t.saldo >= 0 ? GREEN : RED);
-  y += RH + 24;
-  const line = (label, a, bb, big) => { g.font = F(big ? 800 : 400, big ? 28 : 22); g.textAlign = "left"; g.fillStyle = "#111"; g.fillText(label, 40, y); g.textAlign = "right"; g.fillText(a, 760, y); g.fillStyle = GRAY; g.font = F(400, big ? 26 : 22); g.fillText(bb, 900, y); y += big ? 44 : 34; };
+  y += RH + 30;
+  const line = (label, a, bb, big) => { g.font = F(big ? 800 : 400, big ? 22 : 17); g.textAlign = "left"; g.fillStyle = "#111"; g.fillText(label, L, y); g.textAlign = "right"; g.fillText(a, L + 640, y); g.fillStyle = GRAY; g.font = F(400, big ? 20 : 17); g.fillText(bb, L + 780, y); y += big ? 38 : 28; };
   line("Soll-Stunden", hm(t.soll) + " h", dec(t.soll) + " h");
   line("Ist-Stunden (inkl. Urlaub, Krankenstand, Feiertag)", hm(t.ist) + " h", dec(t.ist) + " h");
   line(t.saldo >= 0 ? "Überstunden in diesem Monat" : "Minusstunden in diesem Monat", hmSigned(t.saldo) + " h", dec(t.saldo) + " h", true);
   const ueRate = rateNum("ueber"); if (ueRate && t.saldo > 0) line(`Auszahlung bei ${eur(ueRate)} pro Überstunde (brutto)`, eur(Math.round(t.saldo / 60 * ueRate * 100) / 100), "");
   line("Übertrag aus Vormonat", hmSigned(ub) + " h", dec(ub) + " h");
   line("Zeitkonto am Monatsende", hmSigned(ub + t.saldo) + " h", dec(ub + t.saldo) + " h");
-  g.textAlign = "left"; g.font = F(400, 19); g.fillStyle = GRAY;
-  g.fillText(`Urlaub ${String(t.urlaub).replace(".", ",")} Tage · Krankenstand ${t.krank} Tage · Arztbesuche ${hm(t.arzt)} h${t.kpN ? ` · Kaffeepausen ${t.kpN}×` : ""}`, 40, y + 4);
-  if (isFlex()) { g.font = F(400, 17); g.fillText(flexNote(), 40, y + 34); }
-  return new Promise(res => cv.toBlob(b => res(b), "image/png"));
+  g.textAlign = "left"; g.font = F(400, 15); g.fillStyle = GRAY;
+  g.fillText(fit(`Urlaub ${String(t.urlaub).replace(".", ",")} Tage · Krankenstand ${t.krank} Tage · Arztbesuche ${hm(t.arzt)} h${t.kpN ? ` · Kaffeepausen ${t.kpN}×` : ""}`, R - L), L, y + 2);
+  const sy = Math.max(y + 70, H - 90), mid = (L + R) / 2;
+  g.fillStyle = "#111"; g.fillRect(L, sy, mid - 30 - L, 1.5); g.fillRect(mid + 30, sy, R - mid - 30, 1.5);
+  g.font = F(400, 14); g.fillStyle = GRAY; g.fillText("Datum, Unterschrift Mitarbeiter", L, sy + 18); g.fillText("Datum, Unterschrift Arbeitgeber", mid + 30, sy + 18);
+  const pages = [cv];
+  // Folgeseiten: Kundeneinsätze (wann, wo, wie lange) und Summe je Kunde
+  const ks = kundenEinsaetze(mk);
+  if (ks.length) {
+    const cs = customerStats(mk), KR = 30;
+    const kc = [["Datum", L + 4, "l"], ["Tag", L + 74, "l"], ["Kd.-Nr.", L + 120, "l"], ["Kunde", L + 200, "l"], ["Von", L + 470, "r"], ["Bis", L + 545, "r"], ["Dauer", L + 625, "r"], ["Was gemacht / Notiz", L + 645, "l"]];
+    let pg, pgx, yy;
+    const kcell = (txt, i, y0, color = "#111") => { const [, x, a] = kc[i]; pgx.textAlign = a === "r" ? "right" : "left"; pgx.fillStyle = color; pgx.fillText(txt, x, y0); };
+    const kfit = (txt, maxW) => { if (pgx.measureText(txt).width <= maxW) return txt; let x = txt; while (x.length > 3 && pgx.measureText(x + "…").width > maxW) x = x.slice(0, -1); return x + "…"; };
+    const newPage = () => {
+      pg = document.createElement("canvas"); pg.width = W * SC; pg.height = H * SC; pgx = pg.getContext("2d");
+      pgx.scale(SC, SC); pgx.fillStyle = "#fff"; pgx.fillRect(0, 0, W, H); pgx.textBaseline = "middle";
+      pgx.fillStyle = "#111"; pgx.font = F(700, 30); pgx.textAlign = "left"; pgx.fillText(`Kundeneinsätze ${monthName(mk, s.region)}`, L, 86);
+      pgx.font = F(400, 17); pgx.fillStyle = GRAY; pgx.fillText(s.name || "", L, 120); pgx.textAlign = "right"; pgx.fillText(`Seite ${pages.length + 1}`, R, 120);
+      pgx.fillStyle = GREEN; pgx.fillRect(L, 136, R - L, 3); yy = 150; pages.push(pg);
+    };
+    const head = (cols) => { pgx.fillStyle = GREEN; pgx.fillRect(L, yy, R - L, 30); pgx.font = F(700, 15); cols.forEach((c, i) => { pgx.textAlign = c[2] === "r" ? "right" : "left"; pgx.fillStyle = "#fff"; pgx.fillText(c[0], c[1], yy + 15); }); yy += 30; };
+    newPage(); head(kc);
+    for (const k of ks) {
+      if (yy + KR > H - 70) { newPage(); head(kc); }
+      const d = parseDs(k.ds), m = yy + KR / 2;
+      pgx.fillStyle = "#DDD"; pgx.fillRect(L, yy + KR - 1, R - L, 1);
+      pgx.font = F(400, 16); kcell(`${pad(d.getDate())}.${pad(d.getMonth() + 1)}.`, 0, m); kcell(WD[d.getDay()], 1, m); kcell(k.nr, 2, m);
+      pgx.font = F(700, 16); kcell(kfit(k.name, 255), 3, m); pgx.font = F(400, 16); kcell(k.from, 4, m); kcell(k.to, 5, m);
+      pgx.font = F(700, 16); kcell(k.min ? hm(k.min) : "", 6, m); pgx.font = F(400, 13.5); kcell(kfit(k.note, R - (L + 645) - 4), 7, m, GRAY);
+      yy += KR;
+    }
+    pgx.fillStyle = "#111"; pgx.fillRect(L, yy, R - L, 2); pgx.font = F(700, 16);
+    kcell(`Summe ${ks.length} Einsätze`, 0, yy + KR / 2 + 2); kcell(hm(ks.reduce((a, k) => a + k.min, 0)), 6, yy + KR / 2 + 2); yy += KR + 30;
+    const sc = [["Kd.-Nr.", L + 4, "l"], ["Kunde", L + 90, "l"], ["Einsätze", L + 470, "r"], ["Stunden", L + 580, "r"], ["Dezimal", L + 690, "r"]];
+    if (yy + 40 + 30 + KR * Math.min(cs.length, 3) > H - 70) newPage();
+    pgx.font = F(700, 20); pgx.textAlign = "left"; pgx.fillStyle = "#111"; pgx.fillText("Summe je Kunde", L, yy + 10); yy += 30; head(sc);
+    for (const e of cs) {
+      if (yy + KR > H - 70) { newPage(); head(sc); }
+      const m = yy + KR / 2, cell2 = (txt, i, bold) => { const [, x, a] = sc[i]; pgx.font = F(bold ? 700 : 400, 16); pgx.textAlign = a === "r" ? "right" : "left"; pgx.fillStyle = "#111"; pgx.fillText(txt, x, m); };
+      pgx.fillStyle = "#DDD"; pgx.fillRect(L, yy + KR - 1, R - L, 1);
+      cell2(e.nr, 0); pgx.font = F(700, 16); cell2(kfit(e.name, 360), 1, true); cell2(String(e.n), 2); cell2(hm(e.min), 3, true); cell2(dec(e.min), 4);
+      yy += KR;
+    }
+  }
+  return Promise.all(pages.map(c => new Promise(res => c.toBlob(b => res(b), "image/png"))));
 }
 async function shareOrSave(filename, blob, title) {
+  if (Array.isArray(blob)) {
+    const blobs = blob, names = blobs.length === 1 ? [filename] : blobs.map((_, i) => filename.replace(/\.png$/, `_Seite${i + 1}.png`));
+    try {
+      const fs = blobs.map((b, i) => new File([b], names[i], { type: b.type }));
+      if (navigator.canShare && navigator.canShare({ files: fs })) { await navigator.share({ files: fs, title }); return; }
+    } catch (e) { if (e && e.name === "AbortError") return; }
+    for (let i = 0; i < blobs.length; i++) await shareOrSave(names[i], blobs[i], title);
+    return;
+  }
   try {
     const f = new File([blob], filename, { type: blob.type });
     if (navigator.canShare && navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], title }); return; }
