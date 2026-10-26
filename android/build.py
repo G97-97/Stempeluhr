@@ -12,7 +12,7 @@ APP = os.path.join(ROOT, "app")
 KEY_PEM = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "signing-key.pem")
 CERT_PEM = KEY_PEM.replace("key", "cert")
 OUT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(ROOT, "Stempeluhr.apk")
-VERSION_CODE, VERSION_NAME = 17, "2.6"
+VERSION_CODE, VERSION_NAME = 18, "2.7"
 
 # ---------- String pools ----------
 def string_pool(strings, utf8):

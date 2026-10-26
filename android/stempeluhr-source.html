@@ -212,7 +212,7 @@ button { cursor: pointer; }
 .pr-page { background: #fff; color: #111; border-radius: 8px; padding: 14px; overflow-x: auto; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
 body.printing { overflow: hidden; }
 @media print {
-  @page { size: A4 landscape; margin: 10mm; }
+  @page { size: A4 portrait; margin: 10mm 9mm; }
   body.printing > *:not(#print-root) { display: none !important; }
   html, body.printing { background: #fff !important; }
   body.printing #print-root { position: static; overflow: visible; padding: 0; background: #fff; }
@@ -1451,7 +1451,7 @@ function buildNachweis(mk) {
     <p class="small">${asOf || `Erstellt am ${fmtDate(Date.now())}`}</p></div>
   ${isFlex() ? `<p class="small">${esc(flexNote())}</p>` : ""}
   <table class="nw-t">
-    <thead><tr><th>Datum</th><th>Tag</th><th>Beginn</th><th>Ende</th><th>Pause</th><th>Arbeitszeit</th><th>Betrieb</th><th>Soll</th><th>Ist</th><th>${isFlex() ? "Diffe&shy;renz" : "Über&shy;stunden"}</th><th>Bemerkung</th></tr></thead>
+    <thead><tr><th>Datum</th><th>Tag</th><th>Beginn</th><th>Ende</th><th>Pause</th><th>Arbeits&shy;zeit</th><th>Betrieb</th><th>Soll</th><th>Ist</th><th>${isFlex() ? "Diffe&shy;renz" : "Über&shy;stunden"}</th><th>Bemerkung</th></tr></thead>
     <tbody>${rows}</tbody>
     <tfoot><tr><td colspan="4">Summe</td><td>${hm(t.brk + t.kp)}</td><td>${hm(t.worked)}</td><td>${hm(t.betr)}</td><td>${hm(t.soll)}</td><td>${hm(t.ist)}</td><td class="${t.saldo >= 0 ? "plus" : "minus"}">${hmSigned(t.saldo)}</td><td></td></tr></tfoot>
   </table>
@@ -1472,19 +1472,19 @@ function buildNachweis(mk) {
 const NW_CSS = `.nw{font:10.5pt/1.35 system-ui,Arial,sans-serif;color:#111;background:#fff}
 .nw h1{font-size:13pt;margin:0}.nw p{margin:0}.nw .small{font-size:8.5pt;color:#555}
 .nw-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;border-bottom:2px solid #0E6B57;padding-bottom:4px;margin-bottom:6px}
-.nw-t{width:100%;border-collapse:collapse;font-size:8pt;line-height:1.25;font-variant-numeric:tabular-nums}
-.nw-t th{background:#0E6B57;color:#fff;font-weight:600;text-align:left;padding:3px 4px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-.nw-t td{padding:0 4px;border-bottom:1px solid #ddd;white-space:nowrap}
-.nw-t td.bem{white-space:normal;font-size:8pt;color:#444}
+.nw-t{width:100%;border-collapse:collapse;font-size:9pt;line-height:1.2;font-variant-numeric:tabular-nums}
+.nw-t th{background:#0E6B57;color:#fff;font-weight:600;text-align:left;font-size:7.5pt;line-height:1.15;padding:3px 3px;vertical-align:bottom;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.nw-t td{padding:3px 3px;border-bottom:1px solid #ddd;white-space:nowrap}
+.nw-t td.bem{white-space:normal;font-size:7.5pt;color:#444;width:30%}
 .nw-t tr.we td{background:#f3f3f3;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .nw-t tr.abs td.bem{color:#0E6B57;font-weight:600}
 .nw-t td.plus{color:#0E6B57;font-weight:700}.nw-t td.minus{color:#B3261E;font-weight:700}
 .nw-t tfoot td{border-top:2px solid #111;border-bottom:0;font-weight:700;padding-top:4px}
-.nw-bottom{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:24px;align-items:end;margin-top:8px;break-inside:avoid}
+.nw-bottom{display:grid;grid-template-columns:minmax(0,1fr);gap:26px;align-items:end;margin-top:8px;break-inside:avoid}
 .nw-sum{display:grid;gap:4px}.nw-sum table{border-collapse:collapse;font-size:9pt;max-width:520px}
-.nw-sum td{padding:1px 10px 1px 0}.nw-sum td:nth-child(n+2){text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
+.nw-sum td{padding:1px 14px 1px 0;white-space:nowrap}.nw-sum td:first-child{white-space:normal}.nw-sum td:nth-child(n+2){text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
 .nw-sum td.dec{color:#666;font-weight:400}.nw-sum tr.big td{font-size:11pt;font-weight:800;border-top:1px solid #111;border-bottom:1px solid #111;padding:2px 10px 2px 0}
-.nw-sign{display:grid;gap:30px;padding-bottom:2px}.nw-sign div{border-top:1px solid #111;padding-top:3px;font-size:8.5pt;color:#555}`;
+.nw-sign{display:grid;grid-template-columns:1fr 1fr;gap:40px;padding-bottom:2px}.nw-sign div{border-top:1px solid #111;padding-top:3px;font-size:8.5pt;color:#555}`;
 function openNachweis(mk) {
   const root = $("print-root");
   root.innerHTML = `<div class="pr-bar"><button class="btn primary grow" data-act="nwpng">Als Bild teilen</button><button class="btn grow" data-act="nwprint">PDF</button><button class="btn" data-act="nwclose" aria-label="Schließen">${ICON.x}</button></div>
@@ -1496,7 +1496,7 @@ function openNachweis(mk) {
 function closeNachweis() { const r = $("print-root"); r.hidden = true; r.innerHTML = ""; document.body.classList.remove("printing"); }
 function nachweisFile(mk) {
   return `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Stundenaufzeichnung ${esc(monthName(mk, S.settings.region))}</title>
-<style>@page{size:A4 landscape;margin:10mm}body{margin:0;padding:12px;background:#fff}${NW_CSS}</style></head><body>${buildNachweis(mk)}</body></html>`;
+<style>@page{size:A4 portrait;margin:10mm 9mm}body{margin:0;padding:12px;background:#fff}${NW_CSS}</style></head><body>${buildNachweis(mk)}</body></html>`;
 }
 
 /* ---------- Stundenaufzeichnung als Bild (PNG) zum Weiterschicken ---------- */
@@ -1593,7 +1593,7 @@ function sheetXml(rows, widths, freeze) {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
 <sheetViews><sheetView workbookViewId="0">${freeze ? `<pane ySplit="${freeze}" topLeftCell="A${freeze + 1}" activePane="bottomLeft" state="frozen"/>` : ""}</sheetView></sheetViews>
 <cols>${widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join("")}</cols><sheetData>${body}</sheetData>
-<pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/></worksheet>`;
+<pageSetup paperSize="9" orientation="portrait" fitToWidth="1" fitToHeight="0"/></worksheet>`;
 }
 // Stile: 1 Kopfzeile, 2 Uhrzeit, 3 Stunden 0,00, 4 Summe fett 0,00, 5 Text fett, 6 Titel, 7 Überstunden fett 0,00, 8 Wochenende grau
 const XLSX_STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
