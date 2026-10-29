@@ -595,7 +595,7 @@ async function connect() {
         if ((S.settings.updatedAt || 0) > (remote.has("settings") ? remote.get("settings") : -1)) scheduleRemote("settings");
       }
       setSync("cloud");
-      if (!closedOnce) { closedOnce = true; closeMonths(); changed = true; }
+      if (!closedOnce) { closedOnce = true; mergeDefaultKunden(); assignNumbers(); closeMonths(); changed = true; }
       if (changed) { saveLocal(); render(); }
     }, () => { dbCol = null; setSync("local"); });
   } catch (e) { setSync("local"); }
@@ -1491,6 +1491,30 @@ function parseKundenListe(text) {
   }
   return { out, bad };
 }
+/* Kommissionsliste Tischlerei Höller (Stand 29.10.2026). Wird einmal pro Listenversion ergänzt:
+   fehlende Nummern kommen dazu, eigene Umbenennungen und Löschungen bleiben unangetastet. */
+const KUNDEN_VER = 1;
+const DEFAULT_KUNDEN = [
+  ["26082", "Gehwolf"], ["24098", "Heitele Stefan", "Heitele"], ["25198", "Hafner Mayrhofen", "Hafner"], ["26137", "Lerch Plankenau", "Lerch"],
+  ["25218", "Gruber Werfenweng"], ["26070", "Petra Winetzky", "Winetzky", "Wenetzky"], ["26110", "Wallner Tennenblick", "Wallner"],
+  ["26122", "Hausbacher Westernstadl", "Hausbacher"], ["26084", "Ortswärme / Biomasse", "Ortswärme", "Biomasse"], ["26002", "Nowotny"],
+  ["26085", "Gruber Maurachhof", "Maurachhof"], ["26001", "Harter Florian", "Harter"], ["26135", "Baumangut / Altenhuber", "Baumangut", "Altenhuber"],
+  ["26028", "Gifthütte"], ["26010", "Rohrmoser Kleinarl", "Rohrmoser", "Kleinarl"], ["26022", "Forster Jagdhof", "Forster", "Jagdhof"],
+  ["26008", "Streif B-Hofen", "Streif"], ["26148", "Ostler Wagrain", "Ostler"], ["26117", "Lottermoser Alpenflora", "Lottermoser", "Alpenflora"],
+  ["26155", "Schnell Auhofalm", "Schnell", "Auhofalm"], ["26156", "Dertnig Wagrain", "Dertnig"],
+  ["26169", "Jenerwein Burglehen", "Jenerwein"], ["26165", "Baldauf"], ["26158", "Eisl / Mayr Alpendorf", "Eisl", "Mayr Alpendorf"], ["26152", "Oberauer Hotel Wagrain", "Oberauer"],
+];
+function mergeDefaultKunden() {
+  if ((S.settings.kstammVer || 0) >= KUNDEN_VER) return;
+  const st = { ...kstamm() };
+  for (const [nr, name, ...alt] of DEFAULT_KUNDEN) {
+    if (st[nr]) continue;
+    // Kurznamen, die schon ein anderer Kunde im Stamm benutzt, nicht doppelt vergeben
+    const used = new Set(Object.values(st).flatMap(e => [e.name, ...(e.alt || [])]).map(normName));
+    st[nr] = { nr, name, alt: alt.filter(a => !used.has(normName(a))), at: Date.now() };
+  }
+  S.settings.kstamm = st; S.settings.kstammVer = KUNDEN_VER; saveSettings();
+}
 function importKunden(list) {
   const st = { ...kstamm() }; let neu = 0, ren = 0;
   for (const { nr, name } of list) {
@@ -2258,7 +2282,7 @@ setSync("pending");
 // In der Cloud-Version erst nach dem Abgleich abschließen, damit kein älterer Stand neuere Daten überschreibt
 let closedOnce = false;
 assignNumbers();
-if (window.AndroidBridge || window.STEMPELUHR_OFFLINE || !(window.claude && window.claude.use)) { closedOnce = true; closeMonths(); }
+if (window.AndroidBridge || window.STEMPELUHR_OFFLINE || !(window.claude && window.claude.use)) { closedOnce = true; mergeDefaultKunden(); assignNumbers(); closeMonths(); }
 render();
 connect();
 })();
