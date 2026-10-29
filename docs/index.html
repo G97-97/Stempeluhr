@@ -1566,7 +1566,9 @@ function kundenEinsaetze(mk) {
     out.push({ ds, nr: k.nr || "", name: kCurName(k), from: k.from || "", to: k.to || "", min: kdMin(k, ds), note: k.note || "" });
   return out.sort((a, b) => a.ds.localeCompare(b.ds) || a.from.localeCompare(b.from));
 }
-const nwRemark = c => [((c.rec.kunden || []).filter(k => !isBetr(k)).map(k => kCurName(k)).filter((n, i, a) => n && a.indexOf(n) === i).join(", ")), dayRemark(c)].filter(Boolean).join(" · ");
+// Kunden eines Tages für die Stundenaufzeichnung: „26082 Gehwolf“, jeder Kunde einmal, in zeitlicher Reihenfolge
+const nwKunden = c => [...(c.rec.kunden || [])].filter(k => !isBetr(k)).sort((a, b) => (a.from || "").localeCompare(b.from || ""))
+  .map(k => [k.nr, kCurName(k)].filter(Boolean).join(" ")).filter((n, i, a) => n && a.indexOf(n) === i);
 function buildNachweisKunden(mk) {
   const ks = kundenEinsaetze(mk); if (!ks.length) return "";
   const cs = customerStats(mk), tot = ks.reduce((a, k) => a + k.min, 0);
@@ -1587,8 +1589,8 @@ function buildNachweis(mk) {
   const rows = monthDays(mk).map(ds => {
     const c = calc(ds), r = c.rec, d = parseDs(ds), we = d.getDay() === 0 || d.getDay() === 6;
     const diff = c.counted && (c.saldo || c.ist) ? c.saldo : 0;
-    return `<tr class="${we ? "we" : ""} ${c.kind !== "arbeit" ? "abs" : ""}"><td>${pad(d.getDate())}.${pad(d.getMonth() + 1)}.</td><td>${WD[d.getDay()]}</td><td>${esc(r.in || "")}</td><td>${esc(r.out || "")}</td>
-      <td>${h(c.brk + c.kp)}</td><td><b>${h(c.worked)}</b></td><td>${h(betrMin(r, ds))}</td><td>${h(c.soll)}</td><td>${c.counted ? h(c.ist) : ""}</td><td class="${diff > 0 ? "plus" : diff < 0 ? "minus" : ""}">${sg(diff)}</td><td class="bem">${esc(nwRemark(c))}</td></tr>`;
+    return `<tr class="${we ? "we" : ""} ${c.kind !== "arbeit" ? "abs" : ""}"><td>${pad(d.getDate())}.${pad(d.getMonth() + 1)}.</td><td>${WD[d.getDay()]}</td><td class="kd">${nwKunden(c).map(esc).join("<br>")}</td><td>${esc(r.in || "")}</td><td>${esc(r.out || "")}</td>
+      <td>${h(c.brk + c.kp)}</td><td><b>${h(c.worked)}</b></td><td>${h(betrMin(r, ds))}</td><td>${h(c.soll)}</td><td>${c.counted ? h(c.ist) : ""}</td><td class="${diff > 0 ? "plus" : diff < 0 ? "minus" : ""}">${sg(diff)}</td><td class="bem">${esc(dayRemark(c))}</td></tr>`;
   }).join("");
   const ueRate = rateNum("ueber");
   const asOf = lastDayOf(mk) < `${mk}-${pad(daysInMonth(mk))}` ? `Stand ${fmtDate(Date.now())} (Monat läuft noch)` : "";
@@ -1597,10 +1599,10 @@ function buildNachweis(mk) {
     <p>${esc(s.name || "Name: ________________")}${s.persnr ? ` · Pers.-Nr. ${esc(s.persnr)}` : ""}${s.firma ? ` · ${esc(s.firma)}` : ""}</p></div>
     <p class="small">${asOf || `Erstellt am ${fmtDate(Date.now())}`}</p></div>
   ${isFlex() ? `<p class="small">${esc(flexNote())}</p>` : ""}
-  <table class="nw-t">
-    <thead><tr><th>Datum</th><th>Tag</th><th>Beginn</th><th>Ende</th><th>Pause</th><th>Arbeits&shy;zeit</th><th>Betrieb</th><th>Soll</th><th>Ist</th><th>${isFlex() ? "Diffe&shy;renz" : "Über&shy;stunden"}</th><th>Bemerkung</th></tr></thead>
+  <table class="nw-t${monthDays(mk).reduce((a, ds) => a + Math.max(0, nwKunden(calc(ds)).length - 1), 0) > 10 ? " dense" : ""}">
+    <thead><tr><th>Datum</th><th>Tag</th><th>Kunde</th><th>Beginn</th><th>Ende</th><th>Pause</th><th>Arbeits&shy;zeit</th><th>Betrieb</th><th>Soll</th><th>Ist</th><th>${isFlex() ? "Diffe&shy;renz" : "Über&shy;stunden"}</th><th>Bemerkung</th></tr></thead>
     <tbody>${rows}</tbody>
-    <tfoot><tr><td colspan="4">Summe</td><td>${hm(t.brk + t.kp)}</td><td>${hm(t.worked)}</td><td>${hm(t.betr)}</td><td>${hm(t.soll)}</td><td>${hm(t.ist)}</td><td class="${t.saldo >= 0 ? "plus" : "minus"}">${hmSigned(t.saldo)}</td><td></td></tr></tfoot>
+    <tfoot><tr><td colspan="5">Summe</td><td>${hm(t.brk + t.kp)}</td><td>${hm(t.worked)}</td><td>${hm(t.betr)}</td><td>${hm(t.soll)}</td><td>${hm(t.ist)}</td><td class="${t.saldo >= 0 ? "plus" : "minus"}">${hmSigned(t.saldo)}</td><td></td></tr></tfoot>
   </table>
   <div class="nw-bottom"><div class="nw-sum">
     <table>
@@ -1623,7 +1625,7 @@ const NW_CSS = `.nw{font:10.5pt/1.35 system-ui,Arial,sans-serif;color:#111;backg
 .nw-t{width:100%;border-collapse:collapse;font-size:9pt;line-height:1.2;font-variant-numeric:tabular-nums}
 .nw-t th{background:#0E6B57;color:#fff;font-weight:600;text-align:left;font-size:7.5pt;line-height:1.15;padding:3px 3px;vertical-align:bottom;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .nw-t td{padding:3px 3px;border-bottom:1px solid #ddd;white-space:nowrap}
-.nw-t td.bem{white-space:normal;font-size:7.5pt;color:#444;width:30%}
+.nw-t td.bem{white-space:normal;font-size:7.5pt;color:#444;width:15%}.nw-t td.kd{white-space:normal;font-size:8pt;font-weight:600;width:27%;line-height:1.2}.nw-t.dense td{padding-top:1px;padding-bottom:1px}.nw-t.dense td.kd{font-size:7.5pt;line-height:1.15}
 .nw-t tr.we td{background:#f3f3f3;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .nw-t tr.abs td.bem{color:#0E6B57;font-weight:600}
 .nw-t td.plus{color:#0E6B57;font-weight:700}.nw-t td.minus{color:#B3261E;font-weight:700}
@@ -1655,41 +1657,52 @@ function nachweisPng(mk) {
   // A4 Hochformat (210 × 297 mm) mit Rand, damit das Bild beim Ausdrucken nicht abgeschnitten wird
   const s = S.settings, t = monthStats(mk), ub = monthCarry(mk), days = monthDays(mk);
   const W = 1240, H = 1754, L = 70, R = W - 70, SC = 2;
-  const cv = document.createElement("canvas"); cv.width = W * SC; cv.height = H * SC;
-  const g = cv.getContext("2d"), F = (w, px) => `${w} ${px}px Arial, "Helvetica Neue", sans-serif`;
-  g.scale(SC, SC); g.fillStyle = "#fff"; g.fillRect(0, 0, W, H); g.textBaseline = "middle";
+  const F = (w, px) => `${w} ${px}px Arial, "Helvetica Neue", sans-serif`;
   const GREEN = "#0E6B57", RED = "#B3261E", GRAY = "#555";
+  const pages = []; let cv, g, y;
   const fit = (txt, maxW) => { if (g.measureText(txt).width <= maxW) return txt; let x = txt; while (x.length > 3 && g.measureText(x + "…").width > maxW) x = x.slice(0, -1); return x + "…"; };
-  g.fillStyle = "#111"; g.font = F(700, 30); g.fillText(`Stundenaufzeichnung ${monthName(mk, s.region)}`, L, 86);
-  g.font = F(400, 17); g.fillStyle = GRAY;
-  const asOf = lastDayOf(mk) < `${mk}-${pad(daysInMonth(mk))}` ? `Stand ${fmtDate(Date.now())} (Monat läuft noch)` : `Erstellt am ${fmtDate(Date.now())}`;
-  g.textAlign = "right"; g.fillText(asOf, R, 120); const asW = g.measureText(asOf).width; g.textAlign = "left";
-  g.fillText(fit([s.name || "Name: ______________", s.persnr ? "Pers.-Nr. " + s.persnr : "", s.firma].filter(Boolean).join("  ·  "), R - L - asW - 20), L, 120);
-  g.fillStyle = GREEN; g.fillRect(L, 136, R - L, 3);
-  let y = 150;
-  if (isFlex()) { g.font = F(400, 14); g.fillStyle = GRAY; g.fillText(fit(flexNote(), R - L), L, y + 8); y += 22; }
-  const cols = [["Datum", L + 4, "l"], ["Tag", L + 74, "l"], ["Beginn", L + 182, "r"], ["Ende", L + 256, "r"], ["Pause", L + 326, "r"], ["Arbeit", L + 408, "r"], ["Betrieb", L + 490, "r"], ["Soll", L + 562, "r"], ["Ist", L + 640, "r"], [isFlex() ? "Differenz" : "Überstd.", L + 730, "r"], ["Bemerkung", L + 748, "l"]];
-  const remW = R - (L + 748) - 4;
+  const cols = [["Datum", L + 4, "l"], ["Tag", L + 68, "l"], ["Kunde", L + 108, "l"], ["Beginn", L + 418, "r"], ["Ende", L + 484, "r"], ["Pause", L + 544, "r"], ["Arbeit", L + 616, "r"], ["Betrieb", L + 690, "r"], ["Soll", L + 752, "r"], ["Ist", L + 820, "r"], [isFlex() ? "Diff." : "Überstd.", L + 900, "r"], ["Bemerkung", L + 912, "l"]];
+  const kdW = 255, remW = R - (L + 912) - 4;
   const cell = (txt, i, yy, color = "#111") => { const [, x, a] = cols[i]; g.textAlign = a === "r" ? "right" : "left"; g.fillStyle = color; g.fillText(txt, x, yy); };
-  const headH = 30, bottom = 400, RH = Math.min(32, Math.floor((H - 60 - bottom - y - headH) / (days.length + 1)));
-  g.fillStyle = GREEN; g.fillRect(L, y, R - L, headH); g.font = F(700, 15);
-  cols.forEach((c, i) => cell(c[0], i, y + headH / 2, "#fff")); y += headH;
+  const newPage = () => {
+    cv = document.createElement("canvas"); cv.width = W * SC; cv.height = H * SC; g = cv.getContext("2d");
+    g.scale(SC, SC); g.fillStyle = "#fff"; g.fillRect(0, 0, W, H); g.textBaseline = "middle"; pages.push(cv);
+    g.textAlign = "left"; g.fillStyle = "#111"; g.font = F(700, 30); g.fillText(`Stundenaufzeichnung ${monthName(mk, s.region)}${pages.length > 1 ? " (Fortsetzung)" : ""}`, L, 86);
+    g.font = F(400, 17); g.fillStyle = GRAY;
+    const asOf = pages.length > 1 ? `Seite ${pages.length}` : lastDayOf(mk) < `${mk}-${pad(daysInMonth(mk))}` ? `Stand ${fmtDate(Date.now())} (Monat läuft noch)` : `Erstellt am ${fmtDate(Date.now())}`;
+    g.textAlign = "right"; g.fillText(asOf, R, 120); const asW = g.measureText(asOf).width; g.textAlign = "left";
+    g.fillText(fit([s.name || "Name: ______________", s.persnr ? "Pers.-Nr. " + s.persnr : "", s.firma].filter(Boolean).join("  ·  "), R - L - asW - 20), L, 120);
+    g.fillStyle = GREEN; g.fillRect(L, 136, R - L, 3); y = 150;
+  };
+  const tableHead = () => { g.fillStyle = GREEN; g.fillRect(L, y, R - L, 30); g.font = F(700, 15); cols.forEach((c, i) => cell(c[0], i, y + 15, "#fff")); y += 30; };
+  newPage();
+  if (isFlex()) { g.font = F(400, 14); g.fillStyle = GRAY; g.fillText(fit(flexNote(), R - L), L, y + 8); y += 22; }
+  tableHead();
+  // Zeilenhöhe so wählen, dass alles auf eine Seite passt (bei vielen Kunden enger), sonst Seitenumbruch
+  const kdN = days.map(ds => nwKunden(calc(ds)).length), sumNeed = 6 * 28 + 38 + 30 + 120;
+  let RH = 30, LH = 19;
+  for (const [rh0, lh0] of [[30, 19], [28, 17], [26, 16], [24, 15]]) { RH = rh0; LH = lh0; if (y + kdN.reduce((a, n) => a + Math.max(rh0, 9 + n * lh0), 0) + rh0 + 30 + sumNeed <= H - 20) break; }
+  const kfs = LH >= 19 ? 14.5 : LH >= 17 ? 13.5 : 13, nfs = RH >= 30 ? 16 : 15;
   for (const ds of days) {
-    const c = calc(ds), r = c.rec, d = parseDs(ds), we = d.getDay() === 0 || d.getDay() === 6;
-    if (we) { g.fillStyle = "#F0F0F0"; g.fillRect(L, y, R - L, RH); }
-    g.fillStyle = "#DDD"; g.fillRect(L, y + RH - 1, R - L, 1);
-    const m = y + RH / 2, diff = c.counted && (c.saldo || c.ist) ? c.saldo : 0, b = betrMin(r, ds);
-    g.font = F(400, 16);
-    cell(`${pad(d.getDate())}.${pad(d.getMonth() + 1)}.`, 0, m); cell(WD[d.getDay()], 1, m); cell(r.in || "", 2, m); cell(r.out || "", 3, m);
-    cell(c.brk + c.kp ? hm(c.brk + c.kp) : "", 4, m); g.font = F(700, 16); cell(c.worked ? hm(c.worked) : "", 5, m); g.font = F(400, 16);
-    cell(b ? hm(b) : "", 6, m); cell(c.soll ? hm(c.soll) : "", 7, m); cell(c.counted && c.ist ? hm(c.ist) : "", 8, m);
-    if (diff) { g.font = F(700, 16); cell(hmSigned(diff), 9, m, diff > 0 ? GREEN : RED); }
-    const rem = nwRemark(c); if (rem) { g.font = F(c.kind !== "arbeit" ? 700 : 400, 13.5); cell(fit(rem, remW), 10, m, c.kind !== "arbeit" ? GREEN : GRAY); }
-    y += RH;
+    const c = calc(ds), r = c.rec, d = parseDs(ds), we = d.getDay() === 0 || d.getDay() === 6, kd = nwKunden(c);
+    const rh = Math.max(RH, 9 + kd.length * LH);
+    if (y + rh > H - 50) { newPage(); tableHead(); }
+    if (we) { g.fillStyle = "#F0F0F0"; g.fillRect(L, y, R - L, rh); }
+    g.fillStyle = "#DDD"; g.fillRect(L, y + rh - 1, R - L, 1);
+    const m = y + rh / 2, diff = c.counted && (c.saldo || c.ist) ? c.saldo : 0, b = betrMin(r, ds);
+    g.font = F(400, nfs);
+    cell(`${pad(d.getDate())}.${pad(d.getMonth() + 1)}.`, 0, m); cell(WD[d.getDay()], 1, m); cell(r.in || "", 3, m); cell(r.out || "", 4, m);
+    cell(c.brk + c.kp ? hm(c.brk + c.kp) : "", 5, m); g.font = F(700, nfs); cell(c.worked ? hm(c.worked) : "", 6, m); g.font = F(400, nfs);
+    cell(b ? hm(b) : "", 7, m); cell(c.soll ? hm(c.soll) : "", 8, m); cell(c.counted && c.ist ? hm(c.ist) : "", 9, m);
+    if (diff) { g.font = F(700, nfs); cell(hmSigned(diff), 10, m, diff > 0 ? GREEN : RED); }
+    g.font = F(700, kfs); kd.forEach((k, i) => cell(fit(k, kdW), 2, m + (i - (kd.length - 1) / 2) * LH));
+    const rem = dayRemark(c); if (rem) { g.font = F(c.kind !== "arbeit" ? 700 : 400, 13); cell(fit(rem, remW), 11, m, c.kind !== "arbeit" ? GREEN : GRAY); }
+    y += rh;
   }
   g.fillStyle = "#111"; g.fillRect(L, y, R - L, 2); const m = y + RH / 2 + 2; g.font = F(700, 16);
-  cell("Summe", 0, m); cell(hm(t.brk + t.kp), 4, m); cell(hm(t.worked), 5, m); cell(t.betr ? hm(t.betr) : "", 6, m); cell(hm(t.soll), 7, m); cell(hm(t.ist), 8, m); cell(hmSigned(t.saldo), 9, m, t.saldo >= 0 ? GREEN : RED);
+  cell("Summe", 0, m); cell(hm(t.brk + t.kp), 5, m); cell(hm(t.worked), 6, m); cell(t.betr ? hm(t.betr) : "", 7, m); cell(hm(t.soll), 8, m); cell(hm(t.ist), 9, m); cell(hmSigned(t.saldo), 10, m, t.saldo >= 0 ? GREEN : RED);
   y += RH + 30;
+  if (y + sumNeed > H - 20) newPage();
   const line = (label, a, bb, big) => { g.font = F(big ? 800 : 400, big ? 22 : 17); g.textAlign = "left"; g.fillStyle = "#111"; g.fillText(label, L, y); g.textAlign = "right"; g.fillText(a, L + 640, y); g.fillStyle = GRAY; g.font = F(400, big ? 20 : 17); g.fillText(bb, L + 780, y); y += big ? 38 : 28; };
   line("Soll-Stunden", hm(t.soll) + " h", dec(t.soll) + " h");
   line("Ist-Stunden (inkl. Urlaub, Krankenstand, Feiertag)", hm(t.ist) + " h", dec(t.ist) + " h");
@@ -1702,7 +1715,6 @@ function nachweisPng(mk) {
   const sy = Math.max(y + 70, H - 90), mid = (L + R) / 2;
   g.fillStyle = "#111"; g.fillRect(L, sy, mid - 30 - L, 1.5); g.fillRect(mid + 30, sy, R - mid - 30, 1.5);
   g.font = F(400, 14); g.fillStyle = GRAY; g.fillText("Datum, Unterschrift Mitarbeiter", L, sy + 18); g.fillText("Datum, Unterschrift Arbeitgeber", mid + 30, sy + 18);
-  const pages = [cv];
   // Folgeseiten: Kundeneinsätze (wann, wo, wie lange) und Summe je Kunde
   const ks = kundenEinsaetze(mk);
   if (ks.length) {
