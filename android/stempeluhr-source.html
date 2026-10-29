@@ -583,10 +583,21 @@ const earnBasis = () => EARN_BASIS[S.settings.rateBasis] ? S.settings.rateBasis 
 // eigener Stundensatz je Auswahl (z. B. Überstunden mit Zuschlag); alter Einzelwert gilt als Vorgabe
 const rateStr = b => { const r = S.settings.rates || {}; return r[b] != null ? r[b] : (S.settings.rate || ""); };
 const rateNum = b => { const v = parseFloat(String(rateStr(b)).replace(",", ".")); return isFinite(v) && v > 0 ? v : 0; };
+/* Überstunden, die im Monat noch offen sind: nach einer Auszahlung „auf 0“ zählen nur die Tage ab dem Auszahlungstag,
+   eine Teilauszahlung wird abgezogen. */
+function ueberOffen(t) {
+  if (!t.mk) return { min: t.saldo, seit: null };
+  let min = t.saldo, seit = null;
+  for (const a of auszahlungen().filter(x => x.ds.startsWith(t.mk + "-"))) {
+    if (a.min == null) { min = 0; seit = a.ds; for (const ds of monthDays(t.mk)) if (ds >= a.ds) { const c = calc(ds); if (c.counted) min += c.saldo; } }
+    else min -= a.min;
+  }
+  return { min, seit };
+}
 function earn(t) {
-  const basis = earnBasis(), rate = rateNum(basis);
-  const min = Math.max(0, { worked: t.worked, ist: t.ist, ueber: t.saldo, krank: t.krankMin }[basis]);
-  return { basis, min, rate, sum: Math.round(min / 60 * rate * 100) / 100 };
+  const basis = earnBasis(), rate = rateNum(basis), uo = basis === "ueber" ? ueberOffen(t) : null;
+  const min = Math.max(0, { worked: t.worked, ist: t.ist, ueber: uo && uo.min, krank: t.krankMin }[basis]);
+  return { basis, min, rate, sum: Math.round(min / 60 * rate * 100) / 100, seit: uo && uo.seit, teil: !!uo && uo.min !== t.saldo && !uo.seit };
 }
 const earnLine = e => `${EARN_BASIS[e.basis]} ${dec(e.min)} h × ${eur(e.rate)} = ${eur(e.sum)}`;
 const kpDefault = () => Math.max(1, Math.min(120, Math.round(Number(S.settings.kpMin) || 10)));
@@ -677,7 +688,7 @@ function calc(ds, rec) {
 
 function monthDays(mk) { const n = daysInMonth(mk), out = []; for (let i = 1; i <= n; i++) out.push(`${mk}-${pad(i)}`); return out; }
 function monthStats(mk) {
-  const t = { soll: 0, ist: 0, saldo: 0, worked: 0, brk: 0, urlaub: 0, krank: 0, pflege: 0, za: 0, arzt: 0, arztN: 0, km: 0, feiertag: 0, workdays: 0, sonder: 0, schule: 0, unbezahlt: 0, unfall: 0, krankMin: 0, kp: 0, kpN: 0, betr: 0 };
+  const t = { mk, soll: 0, ist: 0, saldo: 0, worked: 0, brk: 0, urlaub: 0, krank: 0, pflege: 0, za: 0, arzt: 0, arztN: 0, km: 0, feiertag: 0, workdays: 0, sonder: 0, schule: 0, unbezahlt: 0, unfall: 0, krankMin: 0, kp: 0, kpN: 0, betr: 0 };
   for (const ds of monthDays(mk)) {
     const c = calc(ds);
     if (!c.counted) {
@@ -929,7 +940,7 @@ function viewMonat() {
   </section>`; })()}`;
 }
 function earnOut(e) {
-  return e.rate ? `<span>${dec(e.min)} h × ${eur(e.rate)}</span><b>${eur(e.sum)}</b><small>${EARN_HINT[e.basis]}. Brutto, vor Steuern und Abgaben. Zählt Tage bis heute.</small>`
+  return e.rate ? `<span>${dec(e.min)} h × ${eur(e.rate)}</span><b>${eur(e.sum)}</b><small>${e.seit ? `Überstunden seit der Auszahlung (gezählt ab ${fmtShort(e.seit)})` : e.teil ? "Überstunden im Monat abzüglich bereits ausbezahlter Stunden" : EARN_HINT[e.basis]}. Brutto, vor Steuern und Abgaben. Zählt Tage bis heute.</small>`
     : `<small>Trag einen Betrag pro Stunde ein, dann wird der Gesamtbetrag für den Monat ausgerechnet.</small>`;
 }
 // Kundentabelle: Zeitfelder ohne Uhr-Symbol (Platz). Ein Tipp öffnet deshalb selbst die Zeitauswahl,
@@ -1545,7 +1556,7 @@ function buildNachweis(mk) {
       <tr><td>Soll-Stunden</td><td>${hm(t.soll)} h</td><td class="dec">${dec(t.soll)} h</td></tr>
       <tr><td>Ist-Stunden (inkl. Urlaub, Krankenstand, Feiertag)</td><td>${hm(t.ist)} h</td><td class="dec">${dec(t.ist)} h</td></tr>
       <tr class="big"><td>${t.saldo >= 0 ? "Überstunden" : "Minusstunden"} in diesem Monat</td><td>${hmSigned(t.saldo)} h</td><td class="dec">${dec(t.saldo)} h</td></tr>
-      ${ueRate && t.saldo > 0 ? `<tr><td>Auszahlung bei ${eur(ueRate)} pro Überstunde (brutto)</td><td colspan="2">${eur(Math.round(t.saldo / 60 * ueRate * 100) / 100)}</td></tr>` : ""}
+      ${(() => { const uo = ueberOffen(t); return ueRate && uo.min > 0 ? `<tr><td>Auszahlung bei ${eur(ueRate)} pro Überstunde (brutto)${uo.min !== t.saldo ? `, offene ${hm(uo.min)} h${uo.seit ? ` seit ${fmtShort(uo.seit)}` : ""}` : ""}</td><td colspan="2">${eur(Math.round(uo.min / 60 * ueRate * 100) / 100)}</td></tr>` : ""; })()}
       <tr><td>Übertrag aus Vormonat</td><td>${hmSigned(ub)} h</td><td class="dec">${dec(ub)} h</td></tr>
       ${monthAuszahlungen(mk).map(a => `<tr><td>Ausbezahlt, Zeitkonto ab ${fmtShort(a.ds)} neu</td><td>${hmSigned(-a.paid)} h</td><td class="dec">${dec(-a.paid)} h</td></tr>`).join("")}
       <tr><td>Zeitkonto am Monatsende</td><td>${hmSigned(totalSaldo(lastDayOf(mk)))} h</td><td class="dec">${dec(totalSaldo(lastDayOf(mk)))} h</td></tr>
@@ -1644,7 +1655,7 @@ function nachweisPng(mk) {
   line("Soll-Stunden", hm(t.soll) + " h", dec(t.soll) + " h");
   line("Ist-Stunden (inkl. Urlaub, Krankenstand, Feiertag)", hm(t.ist) + " h", dec(t.ist) + " h");
   line(t.saldo >= 0 ? "Überstunden in diesem Monat" : "Minusstunden in diesem Monat", hmSigned(t.saldo) + " h", dec(t.saldo) + " h", true);
-  const ueRate = rateNum("ueber"); if (ueRate && t.saldo > 0) line(`Auszahlung bei ${eur(ueRate)} pro Überstunde (brutto)`, eur(Math.round(t.saldo / 60 * ueRate * 100) / 100), "");
+  const ueRate = rateNum("ueber"), uo = ueberOffen(t); if (ueRate && uo.min > 0) line(`Auszahlung bei ${eur(ueRate)} pro Überstunde (brutto)${uo.min !== t.saldo ? `, offene ${hm(uo.min)} h` : ""}`, eur(Math.round(uo.min / 60 * ueRate * 100) / 100), "");
   line("Übertrag aus Vormonat", hmSigned(ub) + " h", dec(ub) + " h");
   for (const a of monthAuszahlungen(mk)) line(`Ausbezahlt, Zeitkonto ab ${fmtShort(a.ds)} neu`, hmSigned(-a.paid) + " h", dec(-a.paid) + " h");
   line("Zeitkonto am Monatsende", hmSigned(totalSaldo(lastDayOf(mk))) + " h", dec(totalSaldo(lastDayOf(mk))) + " h");
@@ -1797,7 +1808,10 @@ function buildXlsx(mk) {
   for (const a of ausz) rows.push([`Ausbezahlt, Zeitkonto ab ${fmtShort(a.ds)} neu`, null, null, null, null, { n: -H(a.paid), s: 3 }]);
   rows.push([{ t: "Zeitkonto Monatsende", s: 5 }, null, null, null, null, { f: `SUM(F${uRow}:F${rows.length})`, v: H(totalSaldo(lastDayOf(mk))), s: 7 }]);
   const ueRate = rateNum("ueber");
-  if (ueRate && t.saldo > 0) rows.push([`Auszahlung Überstunden (brutto, ${dec2(ueRate)} € pro Stunde)`, null, null, null, null, { f: `ROUND(F${uRow}*${ueRate},2)`, v: Math.round(H(t.saldo) * ueRate * 100) / 100, s: 4 }]);
+  const uo = ueberOffen(t);
+  if (ueRate && uo.min > 0) rows.push(uo.min !== t.saldo
+    ? [`Auszahlung offene Überstunden ${dec(uo.min)} h${uo.seit ? ` seit ${fmtShort(uo.seit)}` : ""} (brutto, ${dec2(ueRate)} € pro Stunde)`, null, null, null, null, { n: Math.round(H(uo.min) * ueRate * 100) / 100, s: 4 }]
+    : [`Auszahlung Überstunden (brutto, ${dec2(ueRate)} € pro Stunde)`, null, null, null, null, { f: `ROUND(F${uRow}*${ueRate},2)`, v: Math.round(H(t.saldo) * ueRate * 100) / 100, s: 4 }]);
   rows.push(["Urlaub (Tage)", null, null, null, null, { n: t.urlaub, s: 0 }], ["Krankenstand (Tage)", null, null, null, null, { n: t.krank, s: 0 }], ["Arztbesuche (h)", null, null, null, null, { n: H(t.arzt), s: 3 }]);
   rows.push([], [], ["Datum, Unterschrift Mitarbeiter", null, null, null, null, null, null, "Datum, Unterschrift Arbeitgeber"]);
   const sheets = [["Stundenaufzeichnung", sheetXml(rows, [12, 5, 8, 8, 9, 13, 10, 8, 8, 14, 28, 36, 30], first - 1)]];
