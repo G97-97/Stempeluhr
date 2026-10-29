@@ -703,14 +703,26 @@ function allMonthKeys() {
   while (mk <= end) { keys.add(mk); const [y, m] = mk.split("-").map(Number); mk = m === 12 ? `${y + 1}-01` : `${y}-${pad(m + 1)}`; }
   return [...keys].sort();
 }
+/* Auszahlungen: ab r.ds zählt das Zeitkonto neu. r.min = null → alles ausgezahlt (auf 0), sonst r.min Minuten abgezogen. */
+const auszahlungen = () => [...(S.settings.auszahlungen || [])].sort((a, b) => a.ds.localeCompare(b.ds));
+const applyAusz = (s, r) => r.min == null ? 0 : s - r.min;
 function totalSaldo(untilDs) {
   let s = Number(S.settings.startSaldo) || 0;
-  const last = untilDs || todayDs();
+  const last = untilDs || todayDs(), rs = auszahlungen().filter(r => r.ds <= last); let ri = 0;
   for (const mk of allMonthKeys()) {
     if (mk > last.slice(0, 7)) continue;
-    for (const ds of monthDays(mk)) { if (ds > last) break; const c = calc(ds); if (c.counted) s += c.saldo; }
+    for (const ds of monthDays(mk)) {
+      if (ds > last) break;
+      while (ri < rs.length && rs[ri].ds <= ds) s = applyAusz(s, rs[ri++]);
+      const c = calc(ds); if (c.counted) s += c.saldo;
+    }
   }
+  while (ri < rs.length) s = applyAusz(s, rs[ri++]);
   return s;
+}
+// Auszahlungen in einem Monat mit ausgezahlten Minuten (Stand Zeitkonto am Vortag)
+function monthAuszahlungen(mk) {
+  return auszahlungen().filter(r => r.ds.startsWith(mk + "-")).map(r => { const vor = totalSaldo(addDays(r.ds, -1)); return { ...r, paid: r.min == null ? vor : r.min }; });
 }
 function vacation(year) {
   let taken = 0, planned = 0; const today = todayDs();
@@ -824,7 +836,7 @@ function viewHeute() {
     <div class="tile"><span>Arbeitszeit heute</span><b>${hm(c.worked + c.paidAbs - c.unpaid)}</b><small>${isFlex() ? "flexibel, Ø" : "Soll"} ${hm(c.soll)}</small></div>
     ${c.std ? `<div class="tile"><span>Kunden heute</span><b>${hm(kd.reduce((a, k) => a + kdMin(k, ds), 0))}</b><small>${kd.length} Einsätze</small></div>` : `<div class="tile"><span>Pause heute</span><b>${hm(c.brk + c.kp)}</b><small>${c.kp ? `davon Kaffee ${c.kp} Min.` : c.brk >= 30 || c.worked <= 360 ? "in Ordnung" : "unter 30 Min."}</small></div>`}
     <div class="tile"><span>Diese Woche</span><b>${hm(wIst)}</b><small>von ${hm(wSoll)} Soll</small></div>
-    <div class="tile"><span>Zeitkonto gesamt</span><b class="${saldo >= 0 ? "pos" : "neg"}">${hmSigned(saldo)}</b><small>${c.state === "work" || c.state === "pause" ? "ohne laufenden Tag" : "Gleitzeit-Saldo"}</small></div>
+    <div class="tile"><span>Zeitkonto gesamt</span><b class="${saldo >= 0 ? "pos" : "neg"}">${hmSigned(saldo)}</b><small>${c.state === "work" || c.state === "pause" ? "ohne laufenden Tag" : (() => { const a = auszahlungen().filter(x => x.ds <= todayDs()).pop(); return a ? `neu seit ${fmtShort(a.ds)}` : "Gleitzeit-Saldo"; })()}</small></div>
   </section>
   <section class="quick" aria-label="Schnellaktionen">
     <button data-act="partial" data-ds="${ds}">${ICON.steth}Arztbesuch</button>
@@ -894,8 +906,10 @@ function viewMonat() {
       ${t.unbezahlt ? `<dt>Unbezahlter Urlaub</dt><dd>${t.unbezahlt} Tage</dd>` : ""}
       <dt>Kilometer (Dienstfahrten)</dt><dd>${t.km.toLocaleString("de-AT")} km</dd>
       <div class="sep"></div>
+      ${monthAuszahlungen(mk).map(a => `<dt>Ausbezahlt, ab ${fmtShort(a.ds)} neu</dt><dd>${hmSigned(-a.paid)}</dd>`).join("")}
       <dt>Zeitkonto Ende ${monthName(mk, S.settings.region)}</dt><dd class="${totalSaldo(lastDayOf(mk)) >= 0 ? "pos" : "neg"}">${hmSigned(totalSaldo(lastDayOf(mk)))}</dd>
     </dl>
+    <button class="btn" style="width:100%;margin-top:12px" data-act="ausz">💶 Auszahlung · Zeitkonto auf 0</button>
     <button class="btn primary" style="width:100%;margin-top:14px" data-act="nachweis">${ICON.dl} PDF Stundenaufzeichnung</button>
     <div class="btn-row" style="margin-top:8px">
       <button class="btn grow" data-act="xlsx">${ICON.dl} Excel-Datei</button>
@@ -930,6 +944,7 @@ function showKdMat() {
   const t = matOf(n.value); box.hidden = !t; box.innerHTML = t ? `<b>📦 Material für ${esc(kLabel(resolveKunde(n.value)))}:</b><br>${esc(t).replace(/\n/g, "<br>")}` : "";
 }
 document.addEventListener("input", e => {
+  if (["az-ds", "az-alle", "az-teil"].includes(e.target.id)) auszInfo();
   if (e.target.id === "p-modell") { $("p-tage").hidden = e.target.value === "woche"; $("p-woche").hidden = e.target.value !== "woche"; }
   if (e.target.id === "k-name") showKdMat();
   if (e.target.id === "ks-q") { const v = e.target.value, pos = e.target.selectionStart; openKstamm(v); const q = $("ks-q"); q.focus(); q.setSelectionRange(pos, pos); }
@@ -1370,6 +1385,28 @@ function openKsEdit(nr, name) {
       ${e ? `<button class="btn ghost" type="button" data-act="ksdel" data-nr="${esc(e.nr)}" style="width:100%;color:var(--danger)">Aus Kundenliste löschen</button>` : ""}
     </form>`);
 }
+function openAusz() {
+  const list = auszahlungen();
+  openSheet(`<h3>Auszahlung / Zeitkonto neu beginnen</h3>
+    <p class="sub">Ab dem gewählten Tag zählt das Zeitkonto wieder bei null. Die Stunden davor gelten als ausbezahlt. Es wird nichts gelöscht, und in der Stundenaufzeichnung steht die Auszahlung als eigene Zeile.</p>
+    <form class="form" id="ausz-form">
+      <div class="field"><label for="az-ds">Ab diesem Tag neu zählen</label><input type="date" id="az-ds" value="${todayDs()}"></div>
+      <p class="hint" id="az-info"></p>
+      <label class="check"><input type="radio" name="az-art" id="az-alle" checked> Alles ausbezahlt, Zeitkonto auf 0</label>
+      <label class="check"><input type="radio" name="az-art" id="az-teil"> Nur einen Teil ausbezahlt</label>
+      <div class="field" id="az-teilbox" hidden><label for="az-std">Ausbezahlte Stunden</label><input id="az-std" inputmode="decimal" autocomplete="off" placeholder="z. B. 20 oder 12:30"></div>
+      <div id="az-err" class="err" hidden></div>
+      <div class="sheet-actions"><button class="btn primary grow" type="submit">Speichern</button><button class="btn grow" type="button" data-act="closesheet-btn">Abbrechen</button></div>
+    </form>
+    ${list.length ? `<div class="lbl" style="margin-top:16px">Bisherige Auszahlungen</div><div class="list">${list.map(a => `<div class="li"><div><b>ab ${fmtShort(a.ds)} ${a.ds.slice(0, 4)}</b><small>${a.min == null ? "Zeitkonto auf 0" : `${hm(a.min)} h ausbezahlt`}</small></div><button class="btn ghost" data-act="auszdel" data-ds="${a.ds}" aria-label="Auszahlung entfernen">${ICON.x}</button></div>`).join("")}</div>` : ""}`);
+  auszInfo();
+}
+function auszInfo() {
+  const el = $("az-info"), ds = $("az-ds") && $("az-ds").value; if (!el || !ds) return;
+  const v = totalSaldo(addDays(ds, -1));
+  el.textContent = `Zeitkonto bis ${fmtShort(addDays(ds, -1))}: ${hmSigned(v)} h. ${$("az-alle").checked ? `Das wird ausbezahlt, ab ${fmtShort(ds)} beginnt es bei 0.` : "Davon wird der eingetragene Teil abgezogen."}`;
+  $("az-teilbox").hidden = $("az-alle").checked;
+}
 function openKsPaste() {
   openSheet(`<h3>Kundenliste einfügen</h3><p class="sub">Eine Zeile pro Kunde: Nummer und Name, z. B. „1234 Huber“ oder „1234;Huber“. Vorhandene Nummern bekommen den neuen Namen.</p>
     <form class="form" id="ksp-form">
@@ -1449,6 +1486,7 @@ function monthCarry(mk) {
 }
 function dayRemark(c) {
   const r = c.rec, out = [];
+  if (auszahlungen().some(a => a.ds === c.ds)) out.push("Zeitkonto ab hier neu (Auszahlung)");
   if (c.kind !== "arbeit") out.push(c.kind === "feiertag" && c.hol ? c.hol : c.K.label);
   else if (c.hol) out.push(c.hol);
   for (const a of r.abs || []) out.push(`${(PARTIAL[a.type] || {}).label || a.type} ${a.from}–${a.to}`);
@@ -1509,7 +1547,8 @@ function buildNachweis(mk) {
       <tr class="big"><td>${t.saldo >= 0 ? "Überstunden" : "Minusstunden"} in diesem Monat</td><td>${hmSigned(t.saldo)} h</td><td class="dec">${dec(t.saldo)} h</td></tr>
       ${ueRate && t.saldo > 0 ? `<tr><td>Auszahlung bei ${eur(ueRate)} pro Überstunde (brutto)</td><td colspan="2">${eur(Math.round(t.saldo / 60 * ueRate * 100) / 100)}</td></tr>` : ""}
       <tr><td>Übertrag aus Vormonat</td><td>${hmSigned(ub)} h</td><td class="dec">${dec(ub)} h</td></tr>
-      <tr><td>Zeitkonto am Monatsende</td><td>${hmSigned(ub + t.saldo)} h</td><td class="dec">${dec(ub + t.saldo)} h</td></tr>
+      ${monthAuszahlungen(mk).map(a => `<tr><td>Ausbezahlt, Zeitkonto ab ${fmtShort(a.ds)} neu</td><td>${hmSigned(-a.paid)} h</td><td class="dec">${dec(-a.paid)} h</td></tr>`).join("")}
+      <tr><td>Zeitkonto am Monatsende</td><td>${hmSigned(totalSaldo(lastDayOf(mk)))} h</td><td class="dec">${dec(totalSaldo(lastDayOf(mk)))} h</td></tr>
     </table>
     <p class="small">Urlaub ${String(t.urlaub).replace(".", ",")} Tage · Krankenstand ${t.krank} Tage · Arztbesuche ${hm(t.arzt)} h${t.kpN ? ` · Kaffeepausen ${t.kpN}× (${S.settings.kpAbzug !== false ? "abgezogen" : "bezahlt"})` : ""}${t.km ? ` · ${String(t.km).replace(".", ",")} km` : ""}</p>
   </div>
@@ -1577,7 +1616,7 @@ function nachweisPng(mk) {
   if (isFlex()) { g.font = F(400, 14); g.fillStyle = GRAY; g.fillText(fit(flexNote(), R - L), L, y + 8); y += 22; }
   tableHead();
   // Zeilenhöhe so wählen, dass alles auf eine Seite passt (bei vielen Kunden enger), sonst Seitenumbruch
-  const kdN = days.map(ds => nwKunden(calc(ds)).length), sumNeed = 6 * 28 + 38 + 30 + 120;
+  const kdN = days.map(ds => nwKunden(calc(ds)).length), sumNeed = (6 + monthAuszahlungen(mk).length) * 28 + 38 + 30 + 120;
   let RH = 30, LH = 19;
   for (const [rh0, lh0] of [[30, 19], [28, 17], [26, 16], [24, 15]]) { RH = rh0; LH = lh0; if (y + kdN.reduce((a, n) => a + Math.max(rh0, 9 + n * lh0), 0) + rh0 + 30 + sumNeed <= H - 20) break; }
   const kfs = LH >= 19 ? 14.5 : LH >= 17 ? 13.5 : 13, nfs = RH >= 30 ? 16 : 15;
@@ -1607,7 +1646,8 @@ function nachweisPng(mk) {
   line(t.saldo >= 0 ? "Überstunden in diesem Monat" : "Minusstunden in diesem Monat", hmSigned(t.saldo) + " h", dec(t.saldo) + " h", true);
   const ueRate = rateNum("ueber"); if (ueRate && t.saldo > 0) line(`Auszahlung bei ${eur(ueRate)} pro Überstunde (brutto)`, eur(Math.round(t.saldo / 60 * ueRate * 100) / 100), "");
   line("Übertrag aus Vormonat", hmSigned(ub) + " h", dec(ub) + " h");
-  line("Zeitkonto am Monatsende", hmSigned(ub + t.saldo) + " h", dec(ub + t.saldo) + " h");
+  for (const a of monthAuszahlungen(mk)) line(`Ausbezahlt, Zeitkonto ab ${fmtShort(a.ds)} neu`, hmSigned(-a.paid) + " h", dec(-a.paid) + " h");
+  line("Zeitkonto am Monatsende", hmSigned(totalSaldo(lastDayOf(mk))) + " h", dec(totalSaldo(lastDayOf(mk))) + " h");
   g.textAlign = "left"; g.font = F(400, 15); g.fillStyle = GRAY;
   g.fillText(fit(`Urlaub ${String(t.urlaub).replace(".", ",")} Tage · Krankenstand ${t.krank} Tage · Arztbesuche ${hm(t.arzt)} h${t.kpN ? ` · Kaffeepausen ${t.kpN}×` : ""}`, R - L), L, y + 2);
   const sy = Math.max(y + 70, H - 90), mid = (L + R) / 2;
@@ -1752,10 +1792,12 @@ function buildXlsx(mk) {
   rows.push([]);
   const sumRow = rows.length - 1;
   rows.push([{ t: t.saldo >= 0 ? "Überstunden dieser Monat" : "Minusstunden dieser Monat", s: 5 }, null, null, null, null, { f: `J${sumRow}`, v: H(t.saldo), s: 7 }]);
+  const uRow = rows.length, ausz = monthAuszahlungen(mk);
   rows.push(["Übertrag Vormonat", null, null, null, null, { n: H(ub), s: 3 }]);
-  rows.push([{ t: "Zeitkonto Monatsende", s: 5 }, null, null, null, null, { f: `F${rows.length - 1}+F${rows.length}`, v: H(ub + t.saldo), s: 7 }]);
+  for (const a of ausz) rows.push([`Ausbezahlt, Zeitkonto ab ${fmtShort(a.ds)} neu`, null, null, null, null, { n: -H(a.paid), s: 3 }]);
+  rows.push([{ t: "Zeitkonto Monatsende", s: 5 }, null, null, null, null, { f: `SUM(F${uRow}:F${rows.length})`, v: H(totalSaldo(lastDayOf(mk))), s: 7 }]);
   const ueRate = rateNum("ueber");
-  if (ueRate && t.saldo > 0) rows.push([`Auszahlung Überstunden (brutto, ${dec2(ueRate)} € pro Stunde)`, null, null, null, null, { f: `ROUND(F${rows.length - 2}*${ueRate},2)`, v: Math.round(H(t.saldo) * ueRate * 100) / 100, s: 4 }]);
+  if (ueRate && t.saldo > 0) rows.push([`Auszahlung Überstunden (brutto, ${dec2(ueRate)} € pro Stunde)`, null, null, null, null, { f: `ROUND(F${uRow}*${ueRate},2)`, v: Math.round(H(t.saldo) * ueRate * 100) / 100, s: 4 }]);
   rows.push(["Urlaub (Tage)", null, null, null, null, { n: t.urlaub, s: 0 }], ["Krankenstand (Tage)", null, null, null, null, { n: t.krank, s: 0 }], ["Arztbesuche (h)", null, null, null, null, { n: H(t.arzt), s: 3 }]);
   rows.push([], [], ["Datum, Unterschrift Mitarbeiter", null, null, null, null, null, null, "Datum, Unterschrift Arbeitgeber"]);
   const sheets = [["Stundenaufzeichnung", sheetXml(rows, [12, 5, 8, 8, 9, 13, 10, 8, 8, 14, 28, 36, 30], first - 1)]];
@@ -1805,7 +1847,7 @@ function buildCsv(mk) {
   const ub = monthCarry(mk);
   L(["Summe", "", "", "", dec(t.brk + t.kp), dec(t.worked), dec(t.soll), dec(t.ist), dec(t.saldo), dec(t.betr), ""]);
   L([]);
-  L(["Überstunden"]); L(["Übertrag Vormonat (h)", dec(ub)]); L(["Überstunden dieser Monat (h)", dec(t.saldo)]); L(["Zeitkonto Monatsende (h)", dec(ub + t.saldo)]);
+  L(["Überstunden"]); L(["Übertrag Vormonat (h)", dec(ub)]); L(["Überstunden dieser Monat (h)", dec(t.saldo)]); for (const a of monthAuszahlungen(mk)) L([`Ausbezahlt, Zeitkonto ab ${fmtShort(a.ds)} neu (h)`, dec(-a.paid)]); L(["Zeitkonto Monatsende (h)", dec(totalSaldo(lastDayOf(mk)))]);
   L([]);
   L(["Zusammenfassung"]);
   if (isFlex()) L([flexNote()]);
@@ -1924,6 +1966,8 @@ document.addEventListener("click", async e => {
     case "kprowdel": readDraftInputs(); draft.rec.kp.splice(+el.dataset.i, 1); renderEditor(); break;
     case "kdnote": openKdNote(+el.dataset.i); break;
     case "ksopen": openKstamm(); break;
+    case "ausz": openAusz(); break;
+    case "auszdel": { S.settings.auszahlungen = (S.settings.auszahlungen || []).filter(a => a.ds !== el.dataset.ds); saveSettings(); toast("Auszahlung entfernt. Das Zeitkonto rechnet wieder durch."); openAusz(); render(); break; }
     case "kspaste": openKsPaste(); break;
     case "ksedit": openKsEdit(el.dataset.nr, el.dataset.name); break;
     case "ksdel": { const st = { ...kstamm() }; delete st[el.dataset.nr]; S.settings.kstamm = st; saveSettings(); toast(`Kunde ${el.dataset.nr} aus der Liste gelöscht. Alte Einträge behalten die Nummer.`); openKstamm(); break; }
@@ -2079,6 +2123,14 @@ document.addEventListener("submit", e => {
     if (old && old !== nr) for (const mk in S.months) { let ch = false; for (const dd in S.months[mk].days) for (const k of S.months[mk].days[dd].kunden || []) if (k.nr === old) { k.nr = nr; ch = true; } if (ch) { S.months[mk].updatedAt = Date.now(); scheduleRemote("m-" + mk); } }
     const n = assignNumbers(); saveLocal();
     toast(`${nr} · ${name} gespeichert${n ? ` · ${n} alte ${n === 1 ? "Eintrag" : "Einträge"} zugeordnet` : ""}`); openKstamm(); render();
+  } else if (f.id === "ausz-form") {
+    const ds = $("az-ds").value, errEl = $("az-err"), fail = m => { errEl.textContent = m; errEl.hidden = false; };
+    if (!ds) return fail("Bitte ein Datum wählen.");
+    let min = null;
+    if ($("az-teil").checked) { const t = $("az-std").value.trim(), m = t.match(/^(\d{1,4})(?::(\d{2}))?$/) || t.match(/^(\d{1,4})[,.](\d{1,2})$/);
+      min = !m ? null : t.includes(":") ? Number(m[1]) * 60 + Number(m[2] || 0) : Math.round(parseFloat(m[1] + "." + (m[2] || 0)) * 60); if (min == null || min <= 0) return fail("Bitte die ausbezahlten Stunden eintragen, z. B. 20 oder 12:30."); }
+    S.settings.auszahlungen = [...(S.settings.auszahlungen || []).filter(a => a.ds !== ds), { ds, min, at: Date.now() }];
+    saveSettings(); closeSheet(); toast(min == null ? `Zeitkonto ab ${fmtShort(ds)} wieder bei 0.` : `${hm(min)} h ausbezahlt ab ${fmtShort(ds)}.`); render();
   } else if (f.id === "ksp-form") {
     const { out, bad } = parseKundenListe($("ksp-text").value), err = $("ksp-err");
     if (!out.length) { err.textContent = "Keine Zeile erkannt. Bitte „Nummer Name“ pro Zeile."; err.hidden = false; return; }
