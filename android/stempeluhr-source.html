@@ -189,6 +189,12 @@ button { cursor: pointer; }
 .ytr .ok svg { width: 14px; height: 14px; color: var(--accent); vertical-align: -2px; }
 .yth { font-size: 12px; font-weight: 600; color: var(--muted); padding-top: 0; }
 .kp-row { display: flex; gap: 8px; margin-top: 10px; }
+.foto-strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.foto-th { flex: 0 0 auto; width: 76px; height: 76px; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); padding: 0; background: var(--surface-2); }
+.foto-th img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.foto-add { display: grid; place-items: center; align-content: center; gap: 2px; font-size: 24px; color: var(--accent); border-style: dashed; }
+.foto-add span { font-size: 12px; font-weight: 600; }
+.foto-big { width: 100%; max-height: 62vh; object-fit: contain; border-radius: 12px; background: #000; margin: 6px 0 12px; }
 .std-form { display: grid; gap: 6px; margin-top: 14px; }
 .std-form label { font-weight: 600; }
 .std-row { display: flex; gap: 8px; }
@@ -295,6 +301,8 @@ body.printing { overflow: hidden; }
 <div id="sheet-root"></div>
 <div id="toast-root"></div>
 <input type="file" id="import-file" accept="application/json,.json" hidden>
+<input type="file" id="foto-cam" accept="image/*" capture="environment" hidden>
+<input type="file" id="foto-file" accept="image/*" multiple hidden>
 
 <script>
 (() => {
@@ -609,7 +617,7 @@ function sollBase(ds) {
 const isFlex = () => S.settings.modell === "woche";
 const nurStd = () => S.settings.erfassung === "stunden";
 /* Funktionen im Profil ein-/ausblendbar (Standard: alles an). Ausblenden löscht keine Daten. */
-const FUNKTIONEN = { mittag: "Mittagspause stempeln", kaffee: "Kaffeepause", betrieb: "Betrieb einstempeln", kunden: "Kunden", km: "Kilometer", projekt: "Projekt / Kostenstelle", verdienst: "Verdienst im Monat" };
+const FUNKTIONEN = { fotos: "Fotos pro Tag", mittag: "Mittagspause stempeln", kaffee: "Kaffeepause", betrieb: "Betrieb einstempeln", kunden: "Kunden", km: "Kilometer", projekt: "Projekt / Kostenstelle", verdienst: "Verdienst im Monat" };
 const on = k => (S.settings.zeigen || {})[k] !== false;
 /* "8", "7,5", "7.25", "7:30" → Minuten (null wenn ungültig) */
 function parseStd(v) {
@@ -755,6 +763,79 @@ let viewMonth = todayDs().slice(0, 7);
 let viewYear = +todayDs().slice(0, 4);
 let lastUndo = null;
 
+/* ---------- Fotos pro Tag (nur auf diesem Handy, in IndexedDB; localStorage wäre zu klein) ---------- */
+let fotoDbP = null, fotoTarget = null;
+function fotoDb() {
+  if (!fotoDbP) fotoDbP = new Promise((res, rej) => {
+    const rq = indexedDB.open("stempeluhr-fotos", 1);
+    rq.onupgradeneeded = () => { const st = rq.result.createObjectStore("fotos", { keyPath: "id" }); st.createIndex("ds", "ds"); };
+    rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error);
+  });
+  return fotoDbP;
+}
+async function fotoTx(mode, fn) { const db = await fotoDb(); return new Promise((res, rej) => { const tx = db.transaction("fotos", mode), st = tx.objectStore("fotos"); const r = fn(st); tx.oncomplete = () => res(r && r.result); tx.onerror = () => rej(tx.error); }); }
+const fotoList = ds => fotoTx("readonly", st => st.index("ds").getAll(ds)).then(l => (l || []).sort((a, b) => a.at - b.at));
+const fotoGet = id => fotoTx("readonly", st => st.get(id));
+const fotoDel = id => fotoTx("readwrite", st => st.delete(id));
+// Foto verkleinern (max. 1600 px, JPEG), damit viele Bilder Platz haben
+async function fotoShrink(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+    const k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight)), cv = document.createElement("canvas");
+    cv.width = Math.round(img.naturalWidth * k); cv.height = Math.round(img.naturalHeight * k);
+    cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+    return await new Promise(res => cv.toBlob(b => res(b || file), "image/jpeg", 0.8));
+  } finally { URL.revokeObjectURL(url); }
+}
+async function fotoAddFiles(files, ds) {
+  let n = 0;
+  for (const f of files) {
+    if (!f.type.startsWith("image/")) continue;
+    const blob = await fotoShrink(f), at = Date.now() + n;
+    await fotoTx("readwrite", st => st.put({ id: `${ds}-${at}-${Math.random().toString(36).slice(2, 8)}`, ds, at, blob })); n++;
+  }
+  if (n) toast(`${n} Foto${n === 1 ? "" : "s"} für ${fmtShort(ds)} gespeichert.`);
+  hydrateFotos(true);
+}
+// Letzter Tag vor ds mit Fotos (max. 14 Tage zurück), für „Von gestern“
+async function fotoVortag(ds) { for (let i = 1; i <= 14; i++) { const d = addDays(ds, -i), l = await fotoList(d); if (l.length) return { ds: d, list: l }; } return null; }
+const fotoStrip = (ds, add = true) => `<div class="foto-strip" data-fds="${ds}" data-add="${add ? 1 : 0}"></div>`;
+const thumbUrls = new Map();
+async function hydrateFotos(all) {
+  if (!window.indexedDB) return;
+  for (const el of document.querySelectorAll(all ? ".foto-strip" : ".foto-strip:not([data-done])")) {
+    el.dataset.done = "1";
+    const ds = el.dataset.fds, list = await fotoList(ds).catch(() => []);
+    el.innerHTML = list.map(f => { let u = thumbUrls.get(f.id); if (!u) { u = URL.createObjectURL(f.blob); thumbUrls.set(f.id, u); } return `<button type="button" class="foto-th" data-act="fotoview" data-id="${esc(f.id)}" aria-label="Foto ansehen"><img src="${u}" alt=""></button>`; }).join("")
+      + (el.dataset.add === "1" ? `<button type="button" class="foto-th foto-add" data-act="fotoadd" data-ds="${ds}" aria-label="Foto hinzufügen">📷<span>Foto</span></button>` : "")
+      + (!list.length && el.dataset.add !== "1" ? `<span class="hint">Keine Fotos.</span>` : "");
+  }
+  for (const el of document.querySelectorAll(".foto-vortag:not([data-done])")) {
+    el.dataset.done = "1";
+    const v = await fotoVortag(el.dataset.ds).catch(() => null);
+    if (v) { el.innerHTML = `<div class="lbl" style="margin:10px 0 6px">Fotos vom ${fmtShort(v.ds)}</div>${fotoStrip(v.ds, false)}`; hydrateFotos(); }
+  }
+}
+new MutationObserver(() => { if (document.querySelector(".foto-strip:not([data-done]),.foto-vortag:not([data-done])")) hydrateFotos(); }).observe(document.body, { childList: true, subtree: true });
+async function openFoto(id) {
+  const f = await fotoGet(id); if (!f) return;
+  const u = thumbUrls.get(id) || URL.createObjectURL(f.blob); thumbUrls.set(id, u);
+  openSheet(`<h3>Foto vom ${fmtShort(f.ds)} ${f.ds.slice(0, 4)}</h3><p class="sub">Aufgenommen ${new Date(f.at).toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" })} Uhr</p>
+    <img class="foto-big" src="${u}" alt="Foto vom ${fmtShort(f.ds)}">
+    <div class="sheet-actions"><button class="btn primary grow" data-act="fotoshare" data-id="${esc(id)}">Teilen</button><button class="btn grow" data-act="fotodel" data-id="${esc(id)}" style="color:var(--danger)">Löschen</button></div>
+    <button class="btn ghost" style="width:100%" data-act="closesheet-btn">Schließen</button>`);
+}
+function fotoCard(ds) {
+  if (!on("fotos")) return "";
+  if (window.AndroidBridge) return "";
+  return `<section class="card"><div class="row"><h2 style="margin:0">Fotos</h2><button class="btn" data-act="fotogal" data-ds="${ds}">Aus Galerie</button></div>
+    <p class="hint" style="margin:6px 0 8px">Z. B. die Liste oder das Material für morgen. Die Fotos bleiben auf diesem Handy, mit „Teilen“ schickst du sie an Kollegen.</p>
+    ${fotoStrip(ds)}<div class="foto-vortag" data-ds="${ds}"></div></section>`;
+}
+$("foto-cam").addEventListener("change", e => { const fs = [...e.target.files]; e.target.value = ""; if (fs.length && fotoTarget) fotoAddFiles(fs, fotoTarget).catch(() => toast("Foto konnte nicht gespeichert werden.")); });
+$("foto-file").addEventListener("change", e => { const fs = [...e.target.files]; e.target.value = ""; if (fs.length && fotoTarget) fotoAddFiles(fs, fotoTarget).catch(() => toast("Foto konnte nicht gespeichert werden.")); });
+
 function render() {
   for (const b of document.querySelectorAll(".nav button")) b.setAttribute("aria-current", b.dataset.tab === tab ? "page" : "false");
   const s = S.settings;
@@ -841,6 +922,7 @@ function viewHeute() {
       <dl class="kv"><dt>Arbeitszeit</dt><dd>${hm(c.worked)} h</dd><dt>Saldo Monat</dt><dd class="${c.saldo >= 0 ? "pos" : "neg"}">${hmSigned(c.saldo)}</dd>${c.verdienst ? `<dt>Verdienst (brutto)</dt><dd>${eur(c.verdienst.sum)}</dd>` : ""}</dl>
       <div class="btn-row" style="margin-top:12px"><button class="btn primary grow" data-act="closedcsv">${ICON.dl} CSV sichern</button><button class="btn grow" data-act="closedok">OK</button></div></section>`; })()}
   ${on("kunden") || kd.length ? kundenCard : ""}
+  ${fotoCard(ds)}
   <section class="tiles">
     <div class="tile"><span>Arbeitszeit heute</span><b>${hm(c.worked + c.paidAbs - c.unpaid)}</b><small>${isFlex() ? "flexibel, Ø" : "Soll"} ${hm(c.soll)}</small></div>
     ${c.std ? `<div class="tile"><span>Kunden heute</span><b>${hm(kd.reduce((a, k) => a + kdMin(k, ds), 0))}</b><small>${kd.length} Einsätze</small></div>` : `<div class="tile"><span>Pause heute</span><b>${hm(c.brk + c.kp)}</b><small>${c.kp ? `davon Kaffee ${c.kp} Min.` : c.brk >= 30 || c.worked <= 360 ? "in Ordnung" : "unter 30 Min."}</small></div>`}
@@ -1246,6 +1328,7 @@ function renderEditor(err) {
         <div class="field"><label for="e-kpm${i}">Minuten</label><input type="number" inputmode="numeric" min="1" max="120" id="e-kpm${i}" data-kp="${i}" data-f="min" value="${esc(k.min)}"></div>
         <button type="button" class="icon-btn" data-act="kprowdel" data-i="${i}" aria-label="Entfernen">${ICON.x}</button></div>`).join("") || '<p class="hint">Keine.</p>'}
       <button type="button" class="btn" data-act="kprowadd">+ Kaffeepause</button>` : ""}
+      ${on("fotos") && !window.AndroidBridge ? `<div class="lbl">Fotos</div>${fotoStrip(ds)}` : ""}
       <div class="lbl">Stundenweise Abwesenheit (Arzt, Behörde …)</div>
       ${abs || '<p class="hint">Keine.</p>'}
       <button type="button" class="btn" data-act="absadd">+ Arztbesuch / Abwesenheit hinzufügen</button>
@@ -1981,6 +2064,11 @@ document.addEventListener("click", async e => {
     case "kdnote": openKdNote(+el.dataset.i); break;
     case "ksopen": openKstamm(); break;
     case "ausz": openAusz(); break;
+    case "fotoadd": fotoTarget = el.dataset.ds; $("foto-cam").click(); break;
+    case "fotogal": fotoTarget = el.dataset.ds; $("foto-file").click(); break;
+    case "fotoview": openFoto(el.dataset.id); break;
+    case "fotoshare": { const f = await fotoGet(el.dataset.id); if (f) await shareOrSave(`Foto_${f.ds}_${new Date(f.at).toTimeString().slice(0, 5).replace(":", "")}.jpg`, f.blob, `Foto vom ${fmtShort(f.ds)}`); break; }
+    case "fotodel": { if (!confirm("Dieses Foto löschen?")) break; const id = el.dataset.id; await fotoDel(id); const u = thumbUrls.get(id); if (u) URL.revokeObjectURL(u); thumbUrls.delete(id); closeSheet(); toast("Foto gelöscht."); hydrateFotos(true); break; }
     case "auszdel": { S.settings.auszahlungen = (S.settings.auszahlungen || []).filter(a => a.ds !== el.dataset.ds); saveSettings(); toast("Auszahlung entfernt. Das Zeitkonto rechnet wieder durch."); openAusz(); render(); break; }
     case "kspaste": openKsPaste(); break;
     case "ksedit": openKsEdit(el.dataset.nr, el.dataset.name); break;
