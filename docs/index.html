@@ -603,7 +603,7 @@ async function connect() {
         if ((S.settings.updatedAt || 0) > (remote.has("settings") ? remote.get("settings") : -1)) scheduleRemote("settings");
       }
       setSync("cloud");
-      if (!closedOnce) { closedOnce = true; mergeDefaultKunden(); assignNumbers(); closeMonths(); changed = true; }
+      if (!closedOnce) { closedOnce = true; mergeDefaultKunden(); repairKunden(); assignNumbers(); closeMonths(); changed = true; }
       if (changed) { saveLocal(); render(); }
     }, () => { dbCol = null; setSync("local"); });
   } catch (e) { setSync("local"); }
@@ -633,11 +633,44 @@ function resolveKunde(input) {
   if (normName(raw) === "betrieb") return { name: BETRIEB };
   const m = raw.match(/^#?(\d{1,10})(?:\s*[·\-–:;,|\/]\s*|\s+)?(.*)$/);
   if (m) {
-    const nr = m[1], nm = m[2].trim(), e = kstamm()[nr];
+    const nr = m[1], nm = stripNr(nr, m[2]), e = kstamm()[nr];
     return { nr, name: nm || (e ? e.name : ""), typedNr: true };
   }
   const e = findByName(raw);
   return e ? { nr: e.nr, name: raw } : { name: raw };
+}
+// „26022 · 26022 · Name“ → „Name“: wiederholte eigene Nummer vorne im Namen entfernen
+function stripNr(nr, name) {
+  let n = String(name || "").trim(), o;
+  if (!nr) return n;
+  const re = new RegExp("^#?" + nr + "(?:\\s*[·\\-–:;,|\\/]\\s*|\\s+|$)");
+  do { o = n; n = n.replace(re, "").trim(); } while (n !== o && n);
+  return n;
+}
+// Einmalige Reparatur: doppelte Nummern im Namen entfernen, offene Einsätze vergangener Tage bis Arbeitsende schließen
+function repairKunden() {
+  let ch = 0;
+  const st = S.settings.kstamm;
+  if (st) for (const nr in st) {
+    const e = st[nr], nm = stripNr(nr, e.name) || e.name;
+    const alt = [...new Set((e.alt || []).map(a => stripNr(nr, a) || a))].filter(a => normName(a) !== normName(nm));
+    if (nm !== e.name || alt.length !== (e.alt || []).length) { st[nr] = { ...e, name: nm, alt }; ch++; }
+  }
+  if (ch) saveSettings();
+  const today = todayDs(); let n = 0;
+  for (const mk in S.months) {
+    let mch = false;
+    for (const dd in S.months[mk].days) {
+      const r = S.months[mk].days[dd], ds = `${mk}-${dd}`;
+      for (const k of r.kunden || []) {
+        if (k.nr) { const nm = stripNr(k.nr, k.name); if (nm && nm !== k.name) { k.name = nm; mch = true; n++; } }
+        if (k.from && !k.to && r.out && (ds < today || ds === today) && toMin(r.out) > toMin(k.from)) { k.to = r.out; mch = true; n++; }
+      }
+    }
+    if (mch) { S.months[mk].updatedAt = Date.now(); scheduleRemote("m-" + mk); if (S.months[mk].closed) refreshClosed(mk); }
+  }
+  if (n) saveLocal();
+  return ch + n;
 }
 // Neue Nummer oder neuer Name aus einer Eingabe in den Kundenstamm übernehmen
 function learnKunde(rk) {
@@ -1516,6 +1549,7 @@ function cleanRec(r) {
     out[k] = k === "km" ? Number(v) : v;
   }
   if (out.ort === "betrieb") delete out.ort;
+  if (out.out && out.kunden) for (const kd of out.kunden) if (kd.from && !kd.to && toMin(out.out) > toMin(kd.from)) kd.to = out.out;
   return out;
 }
 function isEmptyRec(r, ds) {
@@ -2157,6 +2191,8 @@ function stamp(k) {
   const t = nowHM();
   if (k === "le" && rec.ls === t) { /* gleiche Minute ist erlaubt */ }
   rec[k] = t;
+  // Arbeitsende schließt alle noch laufenden Einsätze (Kunde oder Betrieb)
+  if (k === "out") for (const kd of rec.kunden || []) if (kd.from && !kd.to) kd.to = t;
   setRec(ds, rec);
   lastUndo = { ds, prev: prev ? clone(prev) : null };
   try { navigator.vibrate && navigator.vibrate(30); } catch (e) {}
@@ -2474,7 +2510,7 @@ setSync("pending");
 // In der Cloud-Version erst nach dem Abgleich abschließen, damit kein älterer Stand neuere Daten überschreibt
 let closedOnce = false;
 assignNumbers();
-if (window.AndroidBridge || window.STEMPELUHR_OFFLINE || !(window.claude && window.claude.use)) { closedOnce = true; mergeDefaultKunden(); assignNumbers(); closeMonths(); }
+if (window.AndroidBridge || window.STEMPELUHR_OFFLINE || !(window.claude && window.claude.use)) { closedOnce = true; mergeDefaultKunden(); repairKunden(); assignNumbers(); closeMonths(); }
 render();
 connect();
 })();
