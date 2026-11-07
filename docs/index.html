@@ -722,6 +722,8 @@ const kdDatalist = () => `<datalist id="kd-list">${knownCustomers().map(n => `<o
 const eur = v => v.toLocaleString("de-AT", { style: "currency", currency: "EUR" });
 const EARN_BASIS = { worked: "Gearbeitet", ist: "Mit Urlaub/Krank", ueber: "Überstunden", krank: "Krankenstand" };
 const EARN_HINT = { worked: "gestempelte Arbeitszeit", ist: "Ist-Stunden inkl. Urlaub, Krankenstand, Feiertag", ueber: "Überstunden = Ist minus Soll im Monat", krank: "Stunden der Krankenstandstage" };
+// Beträge netto oder brutto (nur Beschriftung), Standard netto
+const bn = () => S.settings.betragArt === "brutto" ? "brutto" : "netto";
 const earnBasis = () => EARN_BASIS[S.settings.rateBasis] ? S.settings.rateBasis : "worked";
 // eigener Stundensatz je Auswahl (z. B. Überstunden mit Zuschlag); alter Einzelwert gilt als Vorgabe
 const rateStr = b => { const r = S.settings.rates || {}; return r[b] != null ? r[b] : (S.settings.rate || ""); };
@@ -1080,7 +1082,7 @@ function viewHeute() {
   ${(() => { const mk = S.settings.closedNotice, m = mk && S.months[mk]; if (!m || !m.closed) return ""; const c = m.closed;
     return `<section class="card closed-card"><h2>${monthName(mk, S.settings.region)} abgeschlossen</h2>
       <p class="hint" style="margin:0 0 10px">Die Ergebnisse sind gespeichert. Der neue Monat beginnt am 1. wieder bei null.</p>
-      <dl class="kv"><dt>Arbeitszeit</dt><dd>${hm(c.worked)} h</dd><dt>Saldo Monat</dt><dd class="${c.saldo >= 0 ? "pos" : "neg"}">${hmSigned(c.saldo)}</dd>${c.verdienst ? `<dt>Verdienst (brutto)</dt><dd>${eur(c.verdienst.sum)}</dd>` : ""}</dl>
+      <dl class="kv"><dt>Arbeitszeit</dt><dd>${hm(c.worked)} h</dd><dt>Saldo Monat</dt><dd class="${c.saldo >= 0 ? "pos" : "neg"}">${hmSigned(c.saldo)}</dd>${c.verdienst ? `<dt>Verdienst (${bn()})</dt><dd>${eur(c.verdienst.sum)}</dd>` : ""}</dl>
       <div class="btn-row" style="margin-top:12px"><button class="btn primary grow" data-act="closedcsv">${ICON.dl} CSV sichern</button><button class="btn grow" data-act="closedok">OK</button></div></section>`; })()}
   ${on("kunden") || kd.length ? kundenCard : ""}
   ${fotoCard(ds)}
@@ -1179,6 +1181,7 @@ function viewMonat() {
       <div class="field"><label for="m-rate">Betrag pro Stunde (€)</label><input id="m-rate" inputmode="decimal" autocomplete="off" placeholder="z. B. 18,50" value="${esc(String(rateStr(e.basis)).replace(".", ","))}"></div>
       <div class="field"><label for="m-basis">Welche Stunden</label><select id="m-basis">${Object.entries(EARN_BASIS).map(([k, l]) => `<option value="${k}" ${e.basis === k ? "selected" : ""}>${l}</option>`).join("")}</select></div>
     </div>
+    <div class="field"><label for="m-bn">Betrag ist</label><select id="m-bn"><option value="netto" ${bn() === "netto" ? "selected" : ""}>Netto (was ausbezahlt wird)</option><option value="brutto" ${bn() === "brutto" ? "selected" : ""}>Brutto (vor Abzügen)</option></select></div>
     <div class="earn-out" id="earn-out">${earnOut(e)}</div>
   </section>`; })()}`;
 }
@@ -1204,6 +1207,7 @@ document.addEventListener("input", e => {
   if (e.target.id === "ks-q") { const v = e.target.value, pos = e.target.selectionStart; openKstamm(v); const q = $("ks-q"); q.focus(); q.setSelectionRange(pos, pos); }
 });
 document.addEventListener("input", e => {
+  if (e.target.id === "m-bn") { S.settings.betragArt = e.target.value; saveSettings(); toast(`Beträge werden jetzt als ${bn()} beschriftet.`); return; }
   if (e.target.id !== "m-rate" && e.target.id !== "m-basis") return;
   if (e.target.id === "m-basis") { S.settings.rateBasis = e.target.value; $("m-rate").value = String(rateStr(e.target.value)).replace(".", ","); }
   else S.settings.rates = { ...(S.settings.rates || {}), [earnBasis()]: e.target.value.trim().replace(/[^\d,.]/g, "").replace(",", ".") };
@@ -1268,7 +1272,7 @@ function viewJahr() {
       <dt>Krankenstand</dt><dd>${y.krank} Tage</dd>
       <dt>Arztbesuche</dt><dd>${hm(y.arzt)} h</dd>
       <dt>Kilometer</dt><dd>${y.km.toLocaleString("de-AT")} km</dd>
-      ${hasRate ? `<div class="sep"></div><dt>Verdienst (brutto)</dt><dd>${eur(Math.round(y.verdienst * 100) / 100)}</dd>` : ""}
+      ${hasRate ? `<div class="sep"></div><dt>Verdienst (${bn()})</dt><dd>${eur(Math.round(y.verdienst * 100) / 100)}</dd>` : ""}
     </dl>
     <button class="btn primary" style="width:100%;margin-top:14px" data-act="ycsv">${ICON.dl} CSV für ${viewYear}</button>
   </section>`;
@@ -1277,7 +1281,7 @@ function buildYearCsv(year) {
   const s = S.settings, Y = yearStats(year), lines = [];
   const L = arr => lines.push(arr.map(csvCell).join(";"));
   L(["Jahresübersicht", year]); L(["Name", s.name]); L(["Personalnummer", s.persnr]); L(["Firma / Abteilung", s.firma]); L(["Erstellt am", new Date().toLocaleString("de-AT")]);
-  L([]); L(["Monate"]); L(["Monat", "Arbeitstage", "Arbeitszeit (h)", "Ist (h)", "Soll (h)", "Saldo (h)", "Urlaub (Tage)", "Krankenstand (Tage)", "Kunden (h)", "Kilometer", "Verdienst brutto (EUR)", "Abgeschlossen"]);
+  L([]); L(["Monate"]); L(["Monat", "Arbeitstage", "Arbeitszeit (h)", "Ist (h)", "Soll (h)", "Saldo (h)", "Urlaub (Tage)", "Krankenstand (Tage)", "Kunden (h)", "Kilometer", `Verdienst ${bn()} (EUR)`, "Abgeschlossen"]);
   for (const m of Y.months) L([monthName(m.mk, s.region), m.t.workdays, dec(m.t.worked), dec(m.t.ist), dec(m.t.soll), dec(m.t.saldo), String(m.t.urlaub).replace(".", ","), m.t.krank, dec(m.kdMin), String(m.t.km).replace(".", ","), m.e.rate ? dec2(m.e.sum) : "", m.closed ? fmtDate(m.closed.at) : ""]);
   L(["Summe", Y.y.workdays, dec(Y.y.worked), dec(Y.y.ist), dec(Y.y.soll), dec(Y.y.saldo), String(Y.y.urlaub).replace(".", ","), Y.y.krank, dec(Y.y.kdMin), String(Y.y.km).replace(".", ","), Y.months.some(m => m.e.rate) ? dec2(Y.y.verdienst) : "", ""]);
   if (Y.orte.length) { L([]); L(["Arbeitsorte"]); L(["Ort", "Tage", "Stunden (h)"]); for (const [o, v] of Y.orte) L([o, v.tage, dec(v.min)]); }
@@ -1802,7 +1806,7 @@ function buildNachweis(mk) {
       <tr><td>Soll-Stunden</td><td>${hm(t.soll)} h</td><td class="dec">${dec(t.soll)} h</td></tr>
       <tr><td>Ist-Stunden (inkl. Urlaub, Krankenstand, Feiertag)</td><td>${hm(t.ist)} h</td><td class="dec">${dec(t.ist)} h</td></tr>
       <tr class="big"><td>${t.saldo >= 0 ? "Überstunden" : "Minusstunden"} in diesem Monat</td><td>${hmSigned(t.saldo)} h</td><td class="dec">${dec(t.saldo)} h</td></tr>
-      ${(() => { const uo = ueberOffen(t); return ueRate && uo.min > 0 ? `<tr class="pay"><td>Auszahlung bei ${eur(ueRate)} pro Überstunde (brutto)${uo.seit ? `, offene ${hm(uo.min)} h seit ${fmtShort(uo.seit)}` : ""}</td><td colspan="2">${eur(Math.round(uo.min / 60 * ueRate * 100) / 100)}</td></tr>` : ""; })()}
+      ${(() => { const uo = ueberOffen(t); return ueRate && uo.min > 0 ? `<tr class="pay"><td>Auszahlung bei ${eur(ueRate)} pro Überstunde (${bn()})${uo.seit ? `, offene ${hm(uo.min)} h seit ${fmtShort(uo.seit)}` : ""}</td><td colspan="2">${eur(Math.round(uo.min / 60 * ueRate * 100) / 100)}</td></tr>` : ""; })()}
       <tr><td>Übertrag aus Vormonat</td><td>${hmSigned(ub)} h</td><td class="dec">${dec(ub)} h</td></tr>
       ${monthAuszahlungen(mk).map(a => `<tr><td>Ausbezahlt, Zeitkonto ab ${fmtShort(a.ds)} neu</td><td>${hmSigned(-a.paid)} h</td><td class="dec">${dec(-a.paid)} h</td></tr>`).join("")}
       <tr><td>Zeitkonto am Monatsende</td><td>${hmSigned(totalSaldo(lastDayOf(mk)))} h</td><td class="dec">${dec(totalSaldo(lastDayOf(mk)))} h</td></tr>
@@ -1905,7 +1909,7 @@ function nachweisPng(mk) {
   line(t.saldo >= 0 ? "Überstunden in diesem Monat" : "Minusstunden in diesem Monat", hmSigned(t.saldo) + " h", dec(t.saldo) + " h", true);
   const ueRate = rateNum("ueber"), uo = ueberOffen(t); if (ueRate && uo.min > 0) {
     // Endbetrag hervorgehoben: grün, fett, hellgrün hinterlegt
-    const lbl = `Auszahlung bei ${eur(ueRate)} pro Überstunde (brutto)${uo.seit ? `, offene ${hm(uo.min)} h seit ${fmtShort(uo.seit)}` : ""}`, amt = eur(Math.round(uo.min / 60 * ueRate * 100) / 100);
+    const lbl = `Auszahlung bei ${eur(ueRate)} pro Überstunde (${bn()})${uo.seit ? `, offene ${hm(uo.min)} h seit ${fmtShort(uo.seit)}` : ""}`, amt = eur(Math.round(uo.min / 60 * ueRate * 100) / 100);
     y += 8; g.fillStyle = "#E3F2EC"; g.fillRect(L - 8, y - 22, 800, 44); g.fillStyle = GREEN; g.fillRect(L - 8, y - 22, 5, 44);
     g.textAlign = "left"; g.font = F(800, 19); g.fillText(fit(lbl, 520), L + 6, y); g.textAlign = "right"; g.font = F(800, 26); g.fillText(amt, L + 780, y); y += 48;
   }
@@ -2063,8 +2067,8 @@ function buildXlsx(mk) {
   const ueRate = rateNum("ueber");
   const uo = ueberOffen(t);
   if (ueRate && uo.min > 0) rows.push(uo.seit
-    ? [`Auszahlung offene Überstunden ${dec(uo.min)} h${uo.seit ? ` seit ${fmtShort(uo.seit)}` : ""} (brutto, ${dec2(ueRate)} € pro Stunde)`, null, null, null, null, { n: Math.round(H(uo.min) * ueRate * 100) / 100, s: 4 }]
-    : [`Auszahlung Überstunden (brutto, ${dec2(ueRate)} € pro Stunde)`, null, null, null, null, { f: `ROUND(F${uRow}*${ueRate},2)`, v: Math.round(H(t.saldo) * ueRate * 100) / 100, s: 4 }]);
+    ? [`Auszahlung offene Überstunden ${dec(uo.min)} h${uo.seit ? ` seit ${fmtShort(uo.seit)}` : ""} (${bn()}, ${dec2(ueRate)} € pro Stunde)`, null, null, null, null, { n: Math.round(H(uo.min) * ueRate * 100) / 100, s: 4 }]
+    : [`Auszahlung Überstunden (${bn()}, ${dec2(ueRate)} € pro Stunde)`, null, null, null, null, { f: `ROUND(F${uRow}*${ueRate},2)`, v: Math.round(H(t.saldo) * ueRate * 100) / 100, s: 4 }]);
   rows.push(["Urlaub (Tage)", null, null, null, null, { n: t.urlaub, s: 0 }], ["Krankenstand (Tage)", null, null, null, null, { n: t.krank, s: 0 }], ["Arztbesuche (h)", null, null, null, null, { n: H(t.arzt), s: 3 }]);
   rows.push([], [], ["Datum, Unterschrift Mitarbeiter", null, null, null, null, null, null, "Datum, Unterschrift Arbeitgeber"]);
   const sheets = [["Stundenaufzeichnung", sheetXml(rows, [12, 5, 8, 8, 9, 13, 10, 8, 8, 14, 28, 36, 30], first - 1)]];
@@ -2125,7 +2129,7 @@ function buildCsv(mk) {
   L(["Zeitausgleich (Tage)", t.za]); L(["Unbezahlter Urlaub (Tage)", t.unbezahlt]);
   L(["Arztbesuche (Anzahl)", t.arztN]); L(["Arztbesuche (h)", dec(t.arzt)]); L(["Kaffeepausen (Anzahl)", t.kpN]); L(["Kaffeepausen (h)", dec(t.kp), S.settings.kpAbzug !== false ? "von Arbeitszeit abgezogen" : "als Arbeitszeit gezählt"]); L(["Kilometer gesamt", String(t.km).replace(".", ",")]);
   const ea = earn(t);
-  if (ea.rate) { L([]); L(["Verdienst (brutto)"]); L(["Stunden (h)", dec(ea.min), EARN_BASIS[ea.basis]]); L(["Betrag pro Stunde (EUR)", dec2(ea.rate)]); L(["Gesamtbetrag (EUR)", dec2(ea.sum)]); }
+  if (ea.rate) { L([]); L([`Verdienst (${bn()})`]); L(["Stunden (h)", dec(ea.min), EARN_BASIS[ea.basis]]); L(["Betrag pro Stunde (EUR)", dec2(ea.rate)]); L(["Gesamtbetrag (EUR)", dec2(ea.sum)]); }
   const cs = customerStats(mk);
   if (cs.length) {
     L([]); L(["Kundeneinsätze"]);
@@ -2149,7 +2153,7 @@ function buildReport(mk) {
   if (t.unfall) lines.push(`Arbeitsunfall: ${t.unfall} Tage`);
   if (t.km) lines.push(`Dienstfahrten: ${String(t.km).replace(".", ",")} km`);
   const ea = earn(t);
-  if (ea.rate) lines.push("", `Verdienst (brutto): ${earnLine(ea)}`);
+  if (ea.rate) lines.push("", `Verdienst (${bn()}): ${earnLine(ea)}`);
   const abs = [];
   for (const ds of monthDays(mk)) { const c = calc(ds); if (c.kind !== "arbeit" && c.kind !== "feiertag" && c.soll > 0) abs.push(`${fmtShort(ds)} ${c.K.label}${c.rec.beleg ? " (Beleg)" : ""}`); for (const a of c.rec.abs || []) abs.push(`${fmtShort(ds)} ${(PARTIAL[a.type] || {}).label} ${a.from}–${a.to}`); }
   if (abs.length) lines.push("", "Abwesenheiten:", ...abs.map(x => "• " + x));
@@ -2508,7 +2512,7 @@ setInterval(() => {
   if (d.getMinutes() !== lastMinute) {
     lastMinute = d.getMinutes();
     if (todayDs() !== lastDay) { lastDay = todayDs(); viewMonth = lastDay.slice(0, 7); viewYear = +lastDay.slice(0, 4); closeMonths(); }
-    if (!$("sheet-root").innerHTML && (tab === "heute" || tab === "monat") && !["m-rate", "m-basis"].includes((document.activeElement || {}).id)) render();
+    if (!$("sheet-root").innerHTML && (tab === "heute" || tab === "monat") && !["m-rate", "m-basis", "m-bn"].includes((document.activeElement || {}).id)) render();
   }
 }, 1000);
 
