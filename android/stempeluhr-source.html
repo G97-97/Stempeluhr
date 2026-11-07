@@ -1699,7 +1699,7 @@ function buildNachweis(mk) {
       <tr><td>Soll-Stunden</td><td>${hm(t.soll)} h</td><td class="dec">${dec(t.soll)} h</td></tr>
       <tr><td>Ist-Stunden (inkl. Urlaub, Krankenstand, Feiertag)</td><td>${hm(t.ist)} h</td><td class="dec">${dec(t.ist)} h</td></tr>
       <tr class="big"><td>${t.saldo >= 0 ? "Überstunden" : "Minusstunden"} in diesem Monat</td><td>${hmSigned(t.saldo)} h</td><td class="dec">${dec(t.saldo)} h</td></tr>
-      ${(() => { const uo = ueberOffen(t); return ueRate && uo.min > 0 ? `<tr><td>Auszahlung bei ${eur(ueRate)} pro Überstunde (brutto)${uo.seit ? `, offene ${hm(uo.min)} h seit ${fmtShort(uo.seit)}` : ""}</td><td colspan="2">${eur(Math.round(uo.min / 60 * ueRate * 100) / 100)}</td></tr>` : ""; })()}
+      ${(() => { const uo = ueberOffen(t); return ueRate && uo.min > 0 ? `<tr class="pay"><td>Auszahlung bei ${eur(ueRate)} pro Überstunde (brutto)${uo.seit ? `, offene ${hm(uo.min)} h seit ${fmtShort(uo.seit)}` : ""}</td><td colspan="2">${eur(Math.round(uo.min / 60 * ueRate * 100) / 100)}</td></tr>` : ""; })()}
       <tr><td>Übertrag aus Vormonat</td><td>${hmSigned(ub)} h</td><td class="dec">${dec(ub)} h</td></tr>
       ${monthAuszahlungen(mk).map(a => `<tr><td>Ausbezahlt, Zeitkonto ab ${fmtShort(a.ds)} neu</td><td>${hmSigned(-a.paid)} h</td><td class="dec">${dec(-a.paid)} h</td></tr>`).join("")}
       <tr><td>Zeitkonto am Monatsende</td><td>${hmSigned(totalSaldo(lastDayOf(mk)))} h</td><td class="dec">${dec(totalSaldo(lastDayOf(mk)))} h</td></tr>
@@ -1725,6 +1725,7 @@ const NW_CSS = `.nw{font:10.5pt/1.35 system-ui,Arial,sans-serif;color:#111;backg
 .nw-sum{display:grid;gap:4px}.nw-sum table{border-collapse:collapse;font-size:9pt;max-width:520px}
 .nw-sum td{padding:1px 14px 1px 0;white-space:nowrap}.nw-sum td:first-child{white-space:normal}.nw-sum td:nth-child(n+2){text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
 .nw-sum td.dec{color:#666;font-weight:400}.nw-sum tr.big td{font-size:11pt;font-weight:800;border-top:1px solid #111;border-bottom:1px solid #111;padding:2px 10px 2px 0}
+.nw-sum tr.pay td{font-size:12pt;font-weight:800;color:#0E6B57;background:#E3F2EC;padding:5px 10px 5px 6px;-webkit-print-color-adjust:exact;print-color-adjust:exact}.nw-sum tr.pay td:nth-child(2){font-size:14pt;text-align:right}
 .nw-p2{break-before:page;page-break-before:always;margin-top:28px}@media print{.nw-p2{margin-top:0}}
 .nw-h2{font-size:11pt;margin:14px 0 4px}
 .nw-k td.kn,.nw-ks td.kn{white-space:normal;font-weight:600}.nw-k td.bem{width:34%}.nw-ks{width:auto;min-width:60%}
@@ -1770,7 +1771,7 @@ function nachweisPng(mk) {
   if (isFlex()) { g.font = F(400, 14); g.fillStyle = GRAY; g.fillText(fit(flexNote(), R - L), L, y + 8); y += 22; }
   tableHead();
   // Zeilenhöhe so wählen, dass alles auf eine Seite passt (bei vielen Kunden enger), sonst Seitenumbruch
-  const kdN = days.map(ds => nwKunden(calc(ds)).length), sumNeed = (6 + monthAuszahlungen(mk).length) * 28 + 38 + 30 + 120;
+  const kdN = days.map(ds => nwKunden(calc(ds)).length), sumNeed = (6 + monthAuszahlungen(mk).length) * 28 + 38 + 30 + 150;
   let RH = 30, LH = 19;
   for (const [rh0, lh0] of [[30, 19], [28, 17], [26, 16], [24, 15]]) { RH = rh0; LH = lh0; if (y + kdN.reduce((a, n) => a + Math.max(rh0, 9 + n * lh0), 0) + rh0 + 30 + sumNeed <= H - 20) break; }
   const kfs = LH >= 19 ? 14.5 : LH >= 17 ? 13.5 : 13, nfs = RH >= 30 ? 16 : 15;
@@ -1798,7 +1799,12 @@ function nachweisPng(mk) {
   line("Soll-Stunden", hm(t.soll) + " h", dec(t.soll) + " h");
   line("Ist-Stunden (inkl. Urlaub, Krankenstand, Feiertag)", hm(t.ist) + " h", dec(t.ist) + " h");
   line(t.saldo >= 0 ? "Überstunden in diesem Monat" : "Minusstunden in diesem Monat", hmSigned(t.saldo) + " h", dec(t.saldo) + " h", true);
-  const ueRate = rateNum("ueber"), uo = ueberOffen(t); if (ueRate && uo.min > 0) line(`Auszahlung bei ${eur(ueRate)} pro Überstunde (brutto)${uo.seit ? `, offene ${hm(uo.min)} h seit ${fmtShort(uo.seit)}` : ""}`, eur(Math.round(uo.min / 60 * ueRate * 100) / 100), "");
+  const ueRate = rateNum("ueber"), uo = ueberOffen(t); if (ueRate && uo.min > 0) {
+    // Endbetrag hervorgehoben: grün, fett, hellgrün hinterlegt
+    const lbl = `Auszahlung bei ${eur(ueRate)} pro Überstunde (brutto)${uo.seit ? `, offene ${hm(uo.min)} h seit ${fmtShort(uo.seit)}` : ""}`, amt = eur(Math.round(uo.min / 60 * ueRate * 100) / 100);
+    y += 8; g.fillStyle = "#E3F2EC"; g.fillRect(L - 8, y - 22, 800, 44); g.fillStyle = GREEN; g.fillRect(L - 8, y - 22, 5, 44);
+    g.textAlign = "left"; g.font = F(800, 19); g.fillText(fit(lbl, 520), L + 6, y); g.textAlign = "right"; g.font = F(800, 26); g.fillText(amt, L + 780, y); y += 48;
+  }
   line("Übertrag aus Vormonat", hmSigned(ub) + " h", dec(ub) + " h");
   for (const a of monthAuszahlungen(mk)) line(`Ausbezahlt, Zeitkonto ab ${fmtShort(a.ds)} neu`, hmSigned(-a.paid) + " h", dec(-a.paid) + " h");
   line("Zeitkonto am Monatsende", hmSigned(totalSaldo(lastDayOf(mk))) + " h", dec(totalSaldo(lastDayOf(mk))) + " h");
