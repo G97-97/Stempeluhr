@@ -311,6 +311,25 @@ button { cursor: pointer; }
 .ks-row { width: 100%; border: 0; border-bottom: 1px solid var(--line); background: none; text-align: left; font: inherit; color: inherit; }
 .ks-row svg { color: var(--muted); width: 18px; }
 .mat { margin-top: 4px; font-size: 13px; color: var(--break); font-weight: 600; }
+.todo-hint { margin-top: 4px; font-size: 13px; color: var(--accent); font-weight: 600; }
+.bs-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding-bottom: 8px; border-bottom: 2px solid var(--accent); }
+.bs-head b { font-size: 17px; line-height: 1.3; }
+.bs-head small { color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+.bs-head.heute { border-bottom-color: var(--break); }
+.bs-lbl { margin: 12px 0 0; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.bs-row { display: flex; align-items: center; gap: 8px; min-height: 44px; border-bottom: 1px solid var(--line); }
+.bs-row .bs-t { flex: 1; min-width: 0; font-size: 15.5px; line-height: 1.35; padding: 8px 0; overflow-wrap: anywhere; cursor: text; }
+.bs-row.done .bs-t { text-decoration: line-through; color: var(--muted); }
+.bs-chk { flex: none; width: 28px; height: 28px; border-radius: 7px; border: 2px solid var(--muted); background: none; display: grid; place-items: center; color: var(--accent-ink); padding: 0; }
+.bs-row.done .bs-chk { background: var(--accent); border-color: var(--accent); }
+.bs-x { flex: none; width: 34px; height: 34px; border: 0; background: none; color: var(--muted); font-size: 20px; padding: 0; }
+.bs-add { display: flex; align-items: center; gap: 8px; min-height: 44px; border-bottom: 1px dashed var(--line); }
+.bs-add input { flex: 1; min-width: 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 15.5px; padding: 10px 0; outline: none; }
+.bs-add input::placeholder { color: var(--muted); }
+.bs-add button { flex: none; width: 34px; height: 34px; border-radius: 9px; border: 0; background: var(--accent-soft); color: var(--accent); font-size: 20px; font-weight: 700; padding: 0; }
+.bs-done { margin-top: 10px; }
+.bs-done summary { font-size: 13px; color: var(--muted); cursor: pointer; padding: 6px 0; }
+.bs-foot { display: flex; justify-content: flex-end; margin-top: 8px; }
 .kd-acts { display: flex; gap: 6px; align-items: center; }
 #print-root { position: fixed; inset: 0; z-index: 60; overflow: auto; background: var(--bg); padding: 12px 12px 40px; }
 .pr-bar { position: sticky; top: 0; display: flex; gap: 8px; padding: 8px 0; background: var(--bg); z-index: 1; }
@@ -356,7 +375,8 @@ body.printing { overflow: hidden; }
 /* Nav */
 .nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--surface); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
 .nav-in { max-width: 560px; margin: 0 auto; display: grid; grid-template-columns: repeat(5, 1fr); height: var(--nav-h); }
-.nav button { border: 0; background: none; display: grid; justify-items: center; align-content: center; gap: 3px; font-size: 11.5px; font-weight: 600; color: var(--muted); }
+.nav button { border: 0; background: none; display: grid; justify-items: center; align-content: center; gap: 3px; font-size: 11.5px; font-weight: 600; color: var(--muted); min-width: 0; padding: 0 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav-in.n6 button { font-size: 10.5px; letter-spacing: -.1px; }
 .nav button[aria-current="page"] { color: var(--accent); }
 
 /* Sheet */
@@ -394,7 +414,8 @@ body.printing { overflow: hidden; }
     <button id="nav-heute" data-tab="heute"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg>Stempeln</button>
     <button id="nav-monat" data-tab="monat"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Monat</button>
     <button id="nav-jahr" data-tab="jahr"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20h16M7 16v-5M12 16V6M17 16v-8"/></svg>Übersicht</button>
-    <button id="nav-abw" data-tab="abw"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 21V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v16l-8-4z"/></svg>Abwesenheit</button>
+    <button id="nav-abw" data-tab="abw"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 21V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v16l-8-4z"/></svg>Abwesend</button>
+    <button id="nav-baust" data-tab="baust"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5h10M9 12h10M9 19h10"/><path d="M3.5 5l1.2 1.2L7 4M3.5 12l1.2 1.2L7 11"/><circle cx="5" cy="19" r="1.2"/></svg>Baustellen</button>
     <button id="nav-profil" data-tab="profil"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>Profil</button>
   </div>
 </nav>
@@ -754,7 +775,7 @@ function sollBase(ds) {
 const isFlex = () => S.settings.modell === "woche";
 const nurStd = () => S.settings.erfassung === "stunden";
 /* Funktionen im Profil ein-/ausblendbar (Standard: alles an). Ausblenden löscht keine Daten. */
-const FUNKTIONEN = { fotos: "Fotos pro Tag", mittag: "Mittagspause stempeln", kaffee: "Kaffeepause", betrieb: "Betrieb einstempeln", kunden: "Kunden", km: "Kilometer", projekt: "Projekt / Kostenstelle", verdienst: "Verdienst im Monat" };
+const FUNKTIONEN = { baust: "Baustellen (offene Arbeiten)", fotos: "Fotos pro Tag", mittag: "Mittagspause stempeln", kaffee: "Kaffeepause", betrieb: "Betrieb einstempeln", kunden: "Kunden", km: "Kilometer", projekt: "Projekt / Kostenstelle", verdienst: "Verdienst im Monat" };
 const on = k => (S.settings.zeigen || {})[k] !== false;
 /* "8", "7,5", "7.25", "7:30" → Minuten (null wenn ungültig) */
 function parseStd(v) {
@@ -1000,11 +1021,15 @@ function fotoCard(ds) {
 for (const id of ["foto-cam", "foto-file"]) $(id).addEventListener("change", e => { const fs = [...e.target.files]; e.target.value = ""; if (fs.length) fotoAddFiles(fs, fotoTarget || todayDs()).catch(x => toast(`Foto konnte nicht gespeichert werden (${(x && x.name) || "Fehler"} ${(x && x.message) || ""}).`)); });
 
 function render() {
+  if (tab === "baust" && !on("baust")) tab = "heute";
+  $("nav-baust").hidden = !on("baust");
+  const navIn = document.querySelector(".nav-in"), nTabs = on("baust") ? 6 : 5;
+  navIn.style.gridTemplateColumns = `repeat(${nTabs}, 1fr)`; navIn.classList.toggle("n6", nTabs === 6);
   for (const b of document.querySelectorAll(".nav button")) b.setAttribute("aria-current", b.dataset.tab === tab ? "page" : "false");
   const s = S.settings;
   $("who").textContent = s.name ? s.name + (s.firma ? " · " + s.firma : "") : "Arbeitszeiterfassung";
   const v = $("view");
-  v.innerHTML = tab === "heute" ? viewHeute() : tab === "monat" ? viewMonat() : tab === "abw" ? viewAbw() : tab === "jahr" ? viewJahr() : viewProfil();
+  v.innerHTML = tab === "heute" ? viewHeute() : tab === "monat" ? viewMonat() : tab === "abw" ? viewAbw() : tab === "jahr" ? viewJahr() : tab === "baust" ? viewBaust() : viewProfil();
 }
 
 const ICON = {
@@ -1057,7 +1082,7 @@ function viewHeute() {
   const kd = r.kunden || [], kdRun = kd.findIndex(k => k.from && !k.to);
   const kundenCard = `<section class="card">
     <div class="row"><h2 style="margin:0">Kunden heute</h2>${kd.length ? `<span class="num" style="color:var(--muted);font-size:13px">${hm(kd.reduce((a, k) => a + kdMin(k, ds), 0))} h</span>` : ""}</div>
-    ${kd.length ? `<div class="list">${kd.map((k, i) => `<div class="li"><div class="kd-open" data-act="kdnote" data-i="${i}" role="button" tabindex="0"><b>${isBetr(k) ? "🏭 " : ""}${k.nr ? `<span class="knr">${esc(k.nr)}</span> ` : ""}${esc(k.name)}</b>${k.to ? "" : ' <span class="chip k-work">läuft</span>'}<small class="num">${esc(k.from)}–${esc(k.to || "jetzt")} · ${hm(kdMin(k, ds))} h${k.note ? " · " + esc(k.note) : ""}</small>${matOf(kLabel(k)) ? `<div class="mat">📦 ${esc(matOf(kLabel(k))).replace(/\n/g, " · ")}</div>` : ""}</div><div class="kd-acts"><button class="btn ghost" data-act="kdnote" data-i="${i}" aria-label="Notiz zu ${esc(k.name)}">${ICON.pen}</button>${k.to ? "" : `<button class="btn primary" data-act="kdstop" data-i="${i}">Fertig</button>`}</div></div>`).join("")}</div>`
+    ${kd.length ? `<div class="list">${kd.map((k, i) => `<div class="li"><div class="kd-open" data-act="kdnote" data-i="${i}" role="button" tabindex="0"><b>${isBetr(k) ? "🏭 " : ""}${k.nr ? `<span class="knr">${esc(k.nr)}</span> ` : ""}${esc(k.name)}</b>${k.to ? "" : ' <span class="chip k-work">läuft</span>'}<small class="num">${esc(k.from)}–${esc(k.to || "jetzt")} · ${hm(kdMin(k, ds))} h${k.note ? " · " + esc(k.note) : ""}</small>${!isBetr(k) && bsOpen(kLabel(k)).length ? `<div class="todo-hint" data-act="tab" data-tab="baust">📝 Noch offen: ${esc(bsOpen(kLabel(k)).map(x => x.t).join(" · "))}</div>` : ""}${matOf(kLabel(k)) ? `<div class="mat">📦 ${esc(matOf(kLabel(k))).replace(/\n/g, " · ")}</div>` : ""}</div><div class="kd-acts"><button class="btn ghost" data-act="kdnote" data-i="${i}" aria-label="Notiz zu ${esc(k.name)}">${ICON.pen}</button>${k.to ? "" : `<button class="btn primary" data-act="kdstop" data-i="${i}">Fertig</button>`}</div></div>`).join("")}</div>`
       : `<p class="hint" style="margin:8px 0 0">Tippe auf „Beim Kunden angekommen“, wenn du bei einer Kundschaft anfängst. Die Zeit läuft, bis du „Fertig“ tippst.</p>`}
     <div class="btn-row" style="margin-top:12px">${kdRun < 0 || isBetr(kd[kdRun]) ? `<button class="btn primary grow" data-act="kdstart" data-ds="${ds}">Beim Kunden angekommen</button>` : ""}<button class="btn grow" data-act="kdadd" data-ds="${ds}">+ Nachtragen</button></div>
   </section>`;
@@ -1606,6 +1631,73 @@ function setMat(name, text) {
   for (const x of matNames(rk)) delete m[x];
   if (text) m[k] = { name: kLabel(rk), text, at: Date.now() }; else delete m[k];
   S.settings.mat = m; saveSettings();
+}
+/* ---------- Baustellen: was bei einer Baustelle noch offen ist (pro Kunde, bleibt bis abgehakt) ----------
+   S.settings.baust = { "<#nr oder name>": { name, items: [{ id, t, done, at }] } }. Material steht weiter in S.settings.mat. */
+const bsAll = () => S.settings.baust || {};
+function bsFind(label) { const b = bsAll(), rk = resolveKunde(label); if (rk.nr && b["#" + rk.nr]) return "#" + rk.nr; for (const x of matNames(rk)) if (b[x]) return x; return null; }
+const bsOpen = label => { const k = bsFind(label); return k ? (bsAll()[k].items || []).filter(i => !i.done) : []; };
+const matLines = label => matOf(label).split("\n").map(x => x.trim()).filter(Boolean);
+function bsLabelOf(key, fallback) {
+  if (key.startsWith("#")) { const nr = key.slice(1), e = kstamm()[nr]; return kLabel({ nr, name: e ? e.name : stripNr(nr, String(fallback || "").replace(/^#?\d+\s*[·\-–:]?\s*/, "")) }); }
+  return fallback || key;
+}
+function bsUpdate(label, fn) {
+  const b = { ...bsAll() }, key = bsFind(label) || matKey(label), e = b[key] ? { ...b[key], items: [...(b[key].items || [])] } : { name: kLabel(resolveKunde(label)), items: [] };
+  fn(e); e.at = Date.now(); b[key] = e; S.settings.baust = b; saveSettings();
+}
+function viewBaust() {
+  const today = todayDs(), r = getRec(today) || {}, cards = new Map();
+  const add = (key, label, heute) => { const c = cards.get(key) || { key, label, heute: false, at: 0 }; if (heute) c.heute = true; if (label && !c.label) c.label = label; cards.set(key, c); return c; };
+  for (const k of r.kunden || []) if (!isBetr(k) && (k.name || k.nr)) { const l = kLabel({ nr: k.nr, name: kCurName(k) }); add(bsFind(l) || matKey(l), l, true); }
+  for (const [key, e] of Object.entries(bsAll())) { const c = add(key, bsLabelOf(key, e.name)); c.at = Math.max(c.at, e.at || 0); }
+  for (const [key, e] of Object.entries(S.settings.mat || {})) if ((e.text || "").trim()) { const l = bsLabelOf(key, e.name), k2 = bsFind(l) || key; if (!cards.has(k2)) { const c = add(k2, l); c.at = Math.max(c.at, e.at || 0); } }
+  const list = [...cards.values()].map(c => ({ ...c, label: bsLabelOf(c.key, c.label), items: ((bsAll()[c.key] || {}).items || []) }))
+    .map(c => ({ ...c, open: c.items.filter(i => !i.done), done: c.items.filter(i => i.done), mat: matLines(c.label) }))
+    .sort((a, b) => (b.heute - a.heute) || ((b.open.length + b.mat.length > 0) - (a.open.length + a.mat.length > 0)) || (b.at - a.at) || a.label.localeCompare(b.label, "de"));
+  const row = (c, it) => `<div class="bs-row${it.done ? " done" : ""}"><button class="bs-chk" data-act="bsdone" data-k="${esc(c.key)}" data-id="${esc(it.id)}" aria-label="${it.done ? "Wieder offen" : "Erledigt"}">${it.done ? "✓" : ""}</button><span class="bs-t" data-act="bsedit" data-k="${esc(c.key)}" data-id="${esc(it.id)}">${esc(it.t)}</span><button class="bs-x" data-act="bsdel" data-k="${esc(c.key)}" data-id="${esc(it.id)}" aria-label="Zeile löschen">×</button></div>`;
+  const mrow = (c, t, i) => `<div class="bs-row"><button class="bs-chk" data-act="bsmatdone" data-k="${esc(c.key)}" data-i="${i}" aria-label="Besorgt"></button><span class="bs-t" data-act="bsmatedit" data-k="${esc(c.key)}" data-i="${i}">${esc(t)}</span><button class="bs-x" data-act="bsmatdone" data-k="${esc(c.key)}" data-i="${i}" aria-label="Zeile löschen">×</button></div>`;
+  const addLine = (c, kind, ph) => `<form class="bs-add" data-k="${esc(c.key)}" data-kind="${kind}"><input autocomplete="off" enterkeyhint="done" placeholder="${ph}" aria-label="${ph} bei ${esc(c.label)}"><button type="submit" aria-label="Zeile hinzufügen">+</button></form>`;
+  const nrOf = l => { const m = l.match(/^(\d+) · (.*)$/); return m ? `<span class="knr">${esc(m[1])}</span> ${esc(m[2])}` : esc(l); };
+  return `<section class="card"><h2>Baustellen</h2>
+    <p class="hint" style="margin:4px 0 10px">Was bei welcher Baustelle noch offen ist und was beim nächsten Mal zu erledigen ist. Abhaken, wenn erledigt. Offene Punkte siehst du auch beim Stempeln, sobald du beim Kunden ankommst.</p>
+    ${kdDatalist()}<form class="bs-add" id="bs-neu" style="border-bottom-style:solid"><input id="bs-neu-in" list="kd-list" autocomplete="off" enterkeyhint="done" placeholder="Neue Baustelle: Nr. oder Name" aria-label="Baustelle hinzufügen"><button type="submit" aria-label="Baustelle hinzufügen">+</button></form>
+  </section>
+  ${list.length ? list.map(c => `<section class="card bs" data-k="${esc(c.key)}">
+    <div class="bs-head${c.heute ? " heute" : ""}"><b>${nrOf(c.label)}</b><small>${c.heute ? "heute · " : ""}${c.open.length ? `${c.open.length} offen` : "nichts offen"}</small></div>
+    <div class="bs-lbl">Noch zu erledigen</div>
+    ${c.open.map(it => row(c, it)).join("")}${addLine(c, "todo", "Neue Zeile …")}
+    <div class="bs-lbl">Material fürs nächste Mal</div>
+    ${c.mat.map((t, i) => mrow(c, t, i)).join("")}${addLine(c, "mat", "Material …")}
+    ${c.done.length ? `<details class="bs-done"><summary>Erledigt (${c.done.length})</summary>${c.done.map(it => row(c, it)).join("")}</details>` : ""}
+    ${!c.open.length && !c.mat.length && !c.heute ? `<div class="bs-foot"><button class="btn ghost" data-act="bsrm" data-k="${esc(c.key)}" style="color:var(--danger)">Baustelle entfernen</button></div>` : ""}
+  </section>`).join("") : `<section class="card"><p class="hint" style="margin:0">Noch keine Baustellen. Oben eine Kundennummer oder einen Namen eintragen.</p></section>`}`;
+}
+const bsLabelByKey = key => { const card = document.querySelector(`.bs[data-k="${CSS.escape(key)}"] .bs-head b`); return card ? card.textContent.trim().replace(/^(\d+)\s+/, "$1 · ") : bsLabelOf(key, (bsAll()[key] || {}).name); };
+function bsRefocus(key, kind) { render(); const f = document.querySelector(`.bs-add[data-k="${CSS.escape(key)}"][data-kind="${kind}"] input`); if (f) f.focus({ preventScroll: true }); }
+document.addEventListener("submit", e => {
+  const f = e.target.closest && e.target.closest(".bs-add"); if (!f) return;
+  e.preventDefault();
+  const inp = f.querySelector("input"), t = inp.value.trim(); if (!t) return;
+  if (f.id === "bs-neu") {
+    const rk = resolveKunde(t); learnKunde(rk); const label = kLabel({ nr: rk.nr, name: rk.nr && kstamm()[rk.nr] ? kstamm()[rk.nr].name : rk.name });
+    if (!bsFind(label)) bsUpdate(label, () => {});
+    render(); const k = bsFind(label); const fi = k && document.querySelector(`.bs-add[data-k="${CSS.escape(k)}"][data-kind="todo"] input`); if (fi) { fi.closest(".bs").scrollIntoView({ block: "start" }); fi.focus({ preventScroll: true }); }
+    return;
+  }
+  const key = f.dataset.k, label = bsLabelByKey(key);
+  if (f.dataset.kind === "mat") setMat(label, [...matLines(label), t].join("\n"));
+  else bsUpdate(label, x => x.items.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), t, done: false, at: Date.now() }));
+  bsRefocus(bsFind(label) || key, f.dataset.kind);
+}, true);
+function bsAct(act, el) {
+  const key = el.dataset.k, label = bsLabelByKey(key), id = el.dataset.id;
+  if (act === "bsdone") { bsUpdate(label, x => { x.items = x.items.map(i => i.id === id ? { ...i, done: !i.done, doneAt: Date.now() } : i); }); render(); }
+  else if (act === "bsdel") { const it = ((bsAll()[key] || {}).items || []).find(i => i.id === id); if (it && !confirm(`„${it.t}“ löschen?`)) return; bsUpdate(label, x => { x.items = x.items.filter(i => i.id !== id); }); render(); }
+  else if (act === "bsedit") { const it = ((bsAll()[key] || {}).items || []).find(i => i.id === id); if (!it) return; const v = prompt("Zeile ändern", it.t); if (v == null) return; const t = v.trim(); bsUpdate(label, x => { x.items = t ? x.items.map(i => i.id === id ? { ...i, t } : i) : x.items.filter(i => i.id !== id); }); render(); }
+  else if (act === "bsmatdone") { const l = matLines(label); l.splice(+el.dataset.i, 1); setMat(label, l.join("\n")); render(); }
+  else if (act === "bsmatedit") { const l = matLines(label), i = +el.dataset.i, v = prompt("Material ändern", l[i]); if (v == null) return; if (v.trim()) l[i] = v.trim(); else l.splice(i, 1); setMat(label, l.join("\n")); render(); }
+  else if (act === "bsrm") { const b = { ...bsAll() }; delete b[key]; S.settings.baust = b; saveSettings(); render(); }
 }
 function openKdNote(i) {
   const k = ((getRec(todayDs()) || {}).kunden || [])[i]; if (!k) return;
@@ -2243,6 +2335,7 @@ document.addEventListener("click", async e => {
     case "fotoadd": fotoTarget = el.dataset.ds; $("foto-cam").click(); break;
     case "fotogal": fotoTarget = el.dataset.ds; $("foto-file").click(); break;
     case "fotoview": openFoto(el.dataset.id); break;
+    case "bsdone": case "bsdel": case "bsedit": case "bsmatdone": case "bsmatedit": case "bsrm": bsAct(act, el); break;
     case "fotoshare": { const f = await fotoGet(el.dataset.id); if (f) await shareOrSave(`Foto_${f.ds}_${new Date(f.at).toTimeString().slice(0, 5).replace(":", "")}.jpg`, fotoBlob(f), `Foto vom ${fmtShort(f.ds)}`); break; }
     case "fotodel": { if (!confirm("Dieses Foto löschen?")) break; const id = el.dataset.id; await fotoDel(id); const u = thumbUrls.get(id); if (u) URL.revokeObjectURL(u); thumbUrls.delete(id); closeSheet(); toast("Foto gelöscht."); hydrateFotos(true); break; }
     case "auszdel": { S.settings.auszahlungen = (S.settings.auszahlungen || []).filter(a => a.ds !== el.dataset.ds); saveSettings(); toast("Auszahlung entfernt. Das Zeitkonto rechnet wieder durch."); openAusz(); render(); break; }
