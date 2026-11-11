@@ -330,6 +330,25 @@ button { cursor: pointer; }
 .bs-done { margin-top: 10px; }
 .bs-done summary { font-size: 13px; color: var(--muted); cursor: pointer; padding: 6px 0; }
 .bs-foot { display: flex; justify-content: flex-end; margin-top: 8px; }
+.sk-thumbs { display: flex; gap: 8px; overflow-x: auto; padding: 8px 0 4px; }
+.sk-th { flex: none; width: 92px; height: 138px; border-radius: 10px; border: 1px solid var(--line); padding: 0; background: #fff; overflow: hidden; }
+.sk-th img { width: 100%; height: 100%; display: block; }
+.sk-th.sk-new { background: var(--surface-2); color: var(--accent); font-weight: 700; font-size: 13px; display: grid; place-items: center; align-content: center; gap: 2px; }
+.sk-th.sk-new span { font-size: 28px; line-height: 1; }
+#sk-root { position: fixed; inset: 0; z-index: 60; background: var(--bg); display: flex; flex-direction: column; padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
+.sk-top { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
+.sk-top b { flex: 1; min-width: 0; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sk-wrap { flex: 1; min-height: 0; display: grid; place-items: center; padding: 0 8px; }
+#sk-cv { touch-action: none; border-radius: 6px; box-shadow: 0 1px 6px rgba(0,0,0,.25); background: #fff; }
+.sk-tools { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; padding: 8px 8px 4px; }
+.sk-tools button, .sk-row2 button { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 10px; min-height: 48px; padding: 2px 0; display: grid; place-items: center; align-content: center; gap: 1px; font-size: 10px; font-weight: 600; }
+.sk-tools button b { font-size: 19px; line-height: 1.1; font-weight: 700; }
+.sk-tools button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.sk-row2 { display: flex; gap: 6px; padding: 0 8px 8px; align-items: center; }
+.sk-row2 button { min-height: 40px; padding: 0 12px; font-size: 13px; }
+.sk-row2 .sk-col { width: 32px; height: 32px; border-radius: 50%; border: 3px solid var(--surface); box-shadow: 0 0 0 1px var(--line); padding: 0 !important; min-height: 0 !important; }
+.sk-row2 .sk-col[aria-pressed="true"] { box-shadow: 0 0 0 3px var(--accent); }
+.sk-row2 .grow { flex: 1; }
 .kd-acts { display: flex; gap: 6px; align-items: center; }
 #print-root { position: fixed; inset: 0; z-index: 60; overflow: auto; background: var(--bg); padding: 12px 12px 40px; }
 .pr-bar { position: sticky; top: 0; display: flex; gap: 8px; padding: 8px 0; background: var(--bg); z-index: 1; }
@@ -1651,10 +1670,11 @@ function viewBaust() {
   const add = (key, label, heute) => { const c = cards.get(key) || { key, label, heute: false, at: 0 }; if (heute) c.heute = true; if (label && !c.label) c.label = label; cards.set(key, c); return c; };
   for (const k of r.kunden || []) if (!isBetr(k) && (k.name || k.nr)) { const l = kLabel({ nr: k.nr, name: kCurName(k) }); add(bsFind(l) || matKey(l), l, true); }
   for (const [key, e] of Object.entries(bsAll())) { const c = add(key, bsLabelOf(key, e.name)); c.at = Math.max(c.at, e.at || 0); }
+  for (const x of Object.values(skLoad())) if (x.k && !cards.has(x.k)) { const c = add(x.k, bsLabelOf(x.k, x.name)); c.at = Math.max(c.at, x.at || 0); }
   for (const [key, e] of Object.entries(S.settings.mat || {})) if ((e.text || "").trim()) { const l = bsLabelOf(key, e.name), k2 = bsFind(l) || key; if (!cards.has(k2)) { const c = add(k2, l); c.at = Math.max(c.at, e.at || 0); } }
   const list = [...cards.values()].map(c => ({ ...c, label: bsLabelOf(c.key, c.label), items: ((bsAll()[c.key] || {}).items || []) }))
-    .map(c => ({ ...c, open: c.items.filter(i => !i.done), done: c.items.filter(i => i.done), mat: matLines(c.label) }))
-    .sort((a, b) => (b.heute - a.heute) || ((b.open.length + b.mat.length > 0) - (a.open.length + a.mat.length > 0)) || (b.at - a.at) || a.label.localeCompare(b.label, "de"));
+    .map(c => ({ ...c, open: c.items.filter(i => !i.done), done: c.items.filter(i => i.done), mat: matLines(c.label), sk: skFor(c.key) }))
+    .sort((a, b) => (b.heute - a.heute) || ((b.open.length + b.mat.length + b.sk.length > 0) - (a.open.length + a.mat.length + a.sk.length > 0)) || (b.at - a.at) || a.label.localeCompare(b.label, "de"));
   const row = (c, it) => `<div class="bs-row${it.done ? " done" : ""}"><button class="bs-chk" data-act="bsdone" data-k="${esc(c.key)}" data-id="${esc(it.id)}" aria-label="${it.done ? "Wieder offen" : "Erledigt"}">${it.done ? "✓" : ""}</button><span class="bs-t" data-act="bsedit" data-k="${esc(c.key)}" data-id="${esc(it.id)}">${esc(it.t)}</span><button class="bs-x" data-act="bsdel" data-k="${esc(c.key)}" data-id="${esc(it.id)}" aria-label="Zeile löschen">×</button></div>`;
   const mrow = (c, t, i) => `<div class="bs-row"><button class="bs-chk" data-act="bsmatdone" data-k="${esc(c.key)}" data-i="${i}" aria-label="Besorgt"></button><span class="bs-t" data-act="bsmatedit" data-k="${esc(c.key)}" data-i="${i}">${esc(t)}</span><button class="bs-x" data-act="bsmatdone" data-k="${esc(c.key)}" data-i="${i}" aria-label="Zeile löschen">×</button></div>`;
   const addLine = (c, kind, ph) => `<form class="bs-add" data-k="${esc(c.key)}" data-kind="${kind}"><input autocomplete="off" enterkeyhint="done" placeholder="${ph}" aria-label="${ph} bei ${esc(c.label)}"><button type="submit" aria-label="Zeile hinzufügen">+</button></form>`;
@@ -1669,8 +1689,10 @@ function viewBaust() {
     ${c.open.map(it => row(c, it)).join("")}${addLine(c, "todo", "Neue Zeile …")}
     <div class="bs-lbl">Material fürs nächste Mal</div>
     ${c.mat.map((t, i) => mrow(c, t, i)).join("")}${addLine(c, "mat", "Material …")}
+    <div class="bs-lbl">Zeichnungen</div>
+    <div class="sk-thumbs">${c.sk.map(x => `<button type="button" class="sk-th" data-act="skopen" data-k="${esc(c.key)}" data-id="${esc(x.id)}" aria-label="Zeichnung öffnen"><img src="${skThumb(x)}" alt=""></button>`).join("")}<button type="button" class="sk-th sk-new" data-act="skopen" data-k="${esc(c.key)}" aria-label="Neue Zeichnung"><span>+</span>Zeichnung</button></div>
     ${c.done.length ? `<details class="bs-done"><summary>Erledigt (${c.done.length})</summary>${c.done.map(it => row(c, it)).join("")}</details>` : ""}
-    ${!c.open.length && !c.mat.length && !c.heute ? `<div class="bs-foot"><button class="btn ghost" data-act="bsrm" data-k="${esc(c.key)}" style="color:var(--danger)">Baustelle entfernen</button></div>` : ""}
+    ${!c.open.length && !c.mat.length && !c.sk.length && !c.heute ? `<div class="bs-foot"><button class="btn ghost" data-act="bsrm" data-k="${esc(c.key)}" style="color:var(--danger)">Baustelle entfernen</button></div>` : ""}
   </section>`).join("") : `<section class="card"><p class="hint" style="margin:0">Noch keine Baustellen. Oben eine Kundennummer oder einen Namen eintragen.</p></section>`}`;
 }
 const bsLabelByKey = key => { const card = document.querySelector(`.bs[data-k="${CSS.escape(key)}"] .bs-head b`); return card ? card.textContent.trim().replace(/^(\d+)\s+/, "$1 · ") : bsLabelOf(key, (bsAll()[key] || {}).name); };
@@ -1698,6 +1720,109 @@ function bsAct(act, el) {
   else if (act === "bsmatdone") { const l = matLines(label); l.splice(+el.dataset.i, 1); setMat(label, l.join("\n")); render(); }
   else if (act === "bsmatedit") { const l = matLines(label), i = +el.dataset.i, v = prompt("Material ändern", l[i]); if (v == null) return; if (v.trim()) l[i] = v.trim(); else l.splice(i, 1); setMat(label, l.join("\n")); render(); }
   else if (act === "bsrm") { const b = { ...bsAll() }; delete b[key]; S.settings.baust = b; saveSettings(); render(); }
+}
+/* ---------- Zeichnungen pro Baustelle (Vektor, eigener localStorage-Schlüssel; Teilen als PNG) ---------- */
+const SK_KEY = "stempeluhr.skizzen", SKW = 1000, SKH = 1500, SK_GRID = 40;
+function skLoad() { try { return JSON.parse(localStorage.getItem(SK_KEY) || "{}") || {}; } catch (e) { return {}; } }
+function skStore(o) { try { localStorage.setItem(SK_KEY, JSON.stringify(o)); return true; } catch (e) { toast("Zeichnung nicht gespeichert: Der Speicher ist voll."); return false; } }
+const skFor = key => Object.entries(skLoad()).filter(([, x]) => x.k === key).map(([id, x]) => ({ id, ...x })).sort((a, b) => a.c - b.c);
+function skPaint(g, items, sc, cur) {
+  g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.scale(sc, sc);
+  g.fillStyle = "#fff"; g.fillRect(0, 0, SKW, SKH);
+  g.strokeStyle = "#DCE6EE"; g.lineWidth = 1.5; g.beginPath();
+  for (let x = SK_GRID; x < SKW; x += SK_GRID) { g.moveTo(x, 0); g.lineTo(x, SKH); }
+  for (let y = SK_GRID; y < SKH; y += SK_GRID) { g.moveTo(0, y); g.lineTo(SKW, y); }
+  g.stroke(); g.lineCap = "round"; g.lineJoin = "round";
+  for (const it of cur ? [...items, cur] : items) skItem(g, it);
+  g.restore();
+}
+function skItem(g, it) {
+  g.strokeStyle = g.fillStyle = it.c || "#111"; g.lineWidth = 5;
+  if (it.t === "pen") { g.beginPath(); it.p.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); if (it.p.length === 1) g.lineTo(it.p[0][0] + .5, it.p[0][1]); g.stroke(); }
+  else if (it.t === "rect") { g.lineWidth = 6; g.strokeRect(Math.min(it.x1, it.x2), Math.min(it.y1, it.y2), Math.abs(it.x2 - it.x1), Math.abs(it.y2 - it.y1)); }
+  else if (it.t === "line") { g.beginPath(); g.moveTo(it.x1, it.y1); g.lineTo(it.x2, it.y2); g.stroke(); }
+  else if (it.t === "text") { g.font = `700 ${it.s || 40}px Arial, "Helvetica Neue", sans-serif`; g.textBaseline = "middle"; g.textAlign = "left"; g.fillText(it.v, it.x, it.y); }
+  else if (it.t === "x") { const r = 18; g.lineWidth = 6; g.beginPath(); g.moveTo(it.x - r, it.y - r); g.lineTo(it.x + r, it.y + r); g.moveTo(it.x + r, it.y - r); g.lineTo(it.x - r, it.y + r); g.stroke(); }
+  else if (it.t === "tri") { const r = 22; g.lineWidth = 5; g.beginPath(); g.moveTo(it.x, it.y - r); g.lineTo(it.x + r * .95, it.y + r * .7); g.lineTo(it.x - r * .95, it.y + r * .7); g.closePath(); g.stroke(); }
+}
+const skThumbCache = new Map();
+function skThumb(x) {
+  const ck = x.id + ":" + x.at; if (skThumbCache.has(ck)) return skThumbCache.get(ck);
+  const cv = document.createElement("canvas"); cv.width = 184; cv.height = 276; skPaint(cv.getContext("2d"), x.items || [], 184 / SKW);
+  const u = cv.toDataURL("image/png"); skThumbCache.set(ck, u); return u;
+}
+const skDist = (px, py, x1, y1, x2, y2) => { const dx = x2 - x1, dy = y2 - y1, l = dx * dx + dy * dy, t = l ? Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / l)) : 0; return Math.hypot(px - x1 - t * dx, py - y1 - t * dy); };
+function skHit(it, x, y) {
+  if (it.t === "pen") return it.p.some((q, i) => skDist(x, y, ...(it.p[i - 1] || q), ...q) < 22);
+  if (it.t === "line") return skDist(x, y, it.x1, it.y1, it.x2, it.y2) < 22;
+  if (it.t === "rect") { const c = [[it.x1, it.y1], [it.x2, it.y1], [it.x2, it.y2], [it.x1, it.y2]]; return c.some((q, i) => skDist(x, y, ...q, ...c[(i + 1) % 4]) < 22); }
+  if (it.t === "text") { const s = it.s || 40; return x > it.x - 10 && x < it.x + it.v.length * s * .62 + 10 && Math.abs(y - it.y) < s * .7; }
+  return Math.hypot(x - it.x, y - it.y) < 34;
+}
+let sk = null;
+const SK_TOOLS = [["pen", "✎", "Stift"], ["rect", "▭", "Rechteck"], ["line", "╱", "Linie"], ["text", "T", "Text"], ["x", "✕", "Kante"], ["tri", "△", "Anschlag"], ["erase", "⌫", "Radieren"], ["undo", "↶", "Zurück"]];
+const SK_COLORS = ["#111111", "#C62828", "#1565C0"];
+function skToolbar() {
+  return SK_TOOLS.map(([t, i, l]) => `<button type="button" data-act="${t === "undo" ? "skundo" : "sktool"}" data-tool="${t}" ${t !== "undo" ? `aria-pressed="${sk.tool === t}"` : ""} aria-label="${l}"><b>${i}</b>${l}</button>`).join("");
+}
+function openSkizze(key, label, id) {
+  const all = skLoad(), old = id && all[id];
+  sk = { id: id || "sk" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), key, label, items: old ? old.items.map(x => ({ ...x })) : [], c: old ? old.c : Date.now(), tool: "pen", color: SK_COLORS[0], cur: null, pid: null };
+  const root = document.createElement("div"); root.id = "sk-root"; root.setAttribute("role", "dialog"); root.setAttribute("aria-label", "Zeichnung " + label);
+  root.innerHTML = `<div class="sk-top"><b>✎ ${esc(label)}</b><button class="btn primary" data-act="skclose">Fertig</button></div>
+    <div class="sk-wrap"><canvas id="sk-cv" aria-label="Zeichenfläche"></canvas></div>
+    <div class="sk-tools" id="sk-tools">${skToolbar()}</div>
+    <div class="sk-row2">${SK_COLORS.map(c => `<button type="button" class="sk-col" data-act="skcol" data-c="${c}" aria-pressed="${sk.color === c}" style="background:${c}" aria-label="Farbe"></button>`).join("")}<span class="grow"></span><button type="button" data-act="skshare">Teilen</button><button type="button" data-act="skdel" style="color:var(--danger)">Löschen</button></div>`;
+  document.body.appendChild(root);
+  const cv = $("sk-cv");
+  const fit = () => { const w = root.querySelector(".sk-wrap"), sc = Math.min((w.clientWidth - 20) / SKW, (w.clientHeight - 10) / SKH), dpr = window.devicePixelRatio || 1;
+    cv.style.width = Math.floor(SKW * sc) + "px"; cv.style.height = Math.floor(SKH * sc) + "px"; cv.width = Math.floor(SKW * sc * dpr); cv.height = Math.floor(SKH * sc * dpr); sk.sc = sc * dpr; sk.css = sc; skRedraw(); };
+  sk.fit = fit; window.addEventListener("resize", fit); fit();
+  const pt = e => { const r = cv.getBoundingClientRect(); return [Math.round((e.clientX - r.left) / sk.css), Math.round((e.clientY - r.top) / sk.css)]; };
+  cv.addEventListener("pointerdown", e => {
+    if (sk.pid != null) return; e.preventDefault();
+    const [x, y] = pt(e), c = sk.color;
+    if (sk.tool === "pen") sk.cur = { t: "pen", c, p: [[x, y]] };
+    else if (sk.tool === "rect" || sk.tool === "line") sk.cur = { t: sk.tool, c, x1: x, y1: y, x2: x, y2: y };
+    else if (sk.tool === "x" || sk.tool === "tri") { sk.items.push({ t: sk.tool, c, x, y }); skSave(); return; }
+    else if (sk.tool === "text") { const v = prompt("Text oder Maß, z. B. 720 × 400"); if (v && v.trim()) { sk.items.push({ t: "text", c, x, y, v: v.trim(), s: 40 }); skSave(); } return; }
+    else if (sk.tool === "erase") { for (let i = sk.items.length - 1; i >= 0; i--) if (skHit(sk.items[i], x, y)) { sk.items.splice(i, 1); skSave(); break; } sk.pid = e.pointerId; cv.setPointerCapture(e.pointerId); return; }
+    sk.pid = e.pointerId; cv.setPointerCapture(e.pointerId); skRedraw();
+  });
+  cv.addEventListener("pointermove", e => {
+    if (e.pointerId !== sk.pid) return; const [x, y] = pt(e);
+    if (sk.tool === "erase") { for (let i = sk.items.length - 1; i >= 0; i--) if (skHit(sk.items[i], x, y)) { sk.items.splice(i, 1); skSave(); break; } return; }
+    if (!sk.cur) return;
+    if (sk.cur.t === "pen") { const l = sk.cur.p[sk.cur.p.length - 1]; if (Math.hypot(x - l[0], y - l[1]) >= 3) sk.cur.p.push([x, y]); } else { sk.cur.x2 = x; sk.cur.y2 = y; }
+    if (!sk.raf) sk.raf = requestAnimationFrame(() => { sk.raf = 0; skRedraw(); });
+  });
+  const up = e => {
+    if (e.pointerId !== sk.pid) return; sk.pid = null; const c = sk.cur; sk.cur = null; if (!c) return;
+    if (c.t === "pen" || Math.hypot(c.x2 - c.x1, c.y2 - c.y1) > 8) { sk.items.push(c); skSave(); } else skRedraw();
+  };
+  cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up);
+}
+function skRedraw() { const cv = $("sk-cv"); if (cv && sk) skPaint(cv.getContext("2d"), sk.items, sk.sc, sk.cur); }
+function skSave() {
+  const all = skLoad();
+  if (sk.items.length) all[sk.id] = { k: sk.key, name: sk.label, c: sk.c, at: Date.now(), items: sk.items }; else delete all[sk.id];
+  skStore(all); skRedraw();
+}
+function skClose() { if (sk && sk.fit) window.removeEventListener("resize", sk.fit); const r = $("sk-root"); if (r) r.remove(); sk = null; render(); }
+async function skAct(act, el) {
+  if (!sk) return;
+  if (act === "sktool") { sk.tool = el.dataset.tool; $("sk-tools").innerHTML = skToolbar(); }
+  else if (act === "skcol") { sk.color = el.dataset.c; for (const b of document.querySelectorAll(".sk-col")) b.setAttribute("aria-pressed", b.dataset.c === sk.color); }
+  else if (act === "skundo") { if (sk.items.length) { sk.items.pop(); skSave(); } }
+  else if (act === "skclose") skClose();
+  else if (act === "skdel") { if (!sk.items.length || confirm("Diese Zeichnung löschen?")) { sk.items = []; skSave(); skClose(); } }
+  else if (act === "skshare") {
+    if (!sk.items.length) return toast("Die Zeichnung ist noch leer.");
+    const cv = document.createElement("canvas"); cv.width = SKW; cv.height = SKH; const g = cv.getContext("2d"); skPaint(g, sk.items, 1);
+    g.fillStyle = "#555"; g.font = "600 26px Arial, sans-serif"; g.textAlign = "left"; g.textBaseline = "alphabetic"; g.fillText(`${sk.label} · ${fmtDate(Date.now())}`, 20, SKH - 20);
+    const b = await new Promise(r => cv.toBlob(r, "image/png"));
+    await shareOrSave(`Zeichnung_${sk.label.replace(/[^\wäöüÄÖÜß-]+/g, "_").slice(0, 40)}_${todayDs()}.png`, b, `Zeichnung ${sk.label}`);
+  }
 }
 function openKdNote(i) {
   const k = ((getRec(todayDs()) || {}).kunden || [])[i]; if (!k) return;
@@ -2335,6 +2460,8 @@ document.addEventListener("click", async e => {
     case "fotoadd": fotoTarget = el.dataset.ds; $("foto-cam").click(); break;
     case "fotogal": fotoTarget = el.dataset.ds; $("foto-file").click(); break;
     case "fotoview": openFoto(el.dataset.id); break;
+    case "skopen": openSkizze(el.dataset.k, bsLabelByKey(el.dataset.k), el.dataset.id); break;
+    case "sktool": case "skcol": case "skundo": case "skclose": case "skdel": case "skshare": await skAct(act, el); break;
     case "bsdone": case "bsdel": case "bsedit": case "bsmatdone": case "bsmatedit": case "bsrm": bsAct(act, el); break;
     case "fotoshare": { const f = await fotoGet(el.dataset.id); if (f) await shareOrSave(`Foto_${f.ds}_${new Date(f.at).toTimeString().slice(0, 5).replace(":", "")}.jpg`, fotoBlob(f), `Foto vom ${fmtShort(f.ds)}`); break; }
     case "fotodel": { if (!confirm("Dieses Foto löschen?")) break; const id = el.dataset.id; await fotoDel(id); const u = thumbUrls.get(id); if (u) URL.revokeObjectURL(u); thumbUrls.delete(id); closeSheet(); toast("Foto gelöscht."); hydrateFotos(true); break; }
@@ -2413,7 +2540,7 @@ document.addEventListener("click", async e => {
       for (const ds of el.dataset.days.split(",")) { const r = getRec(ds); if (!r) continue; const n = clone(r); n.kind = "arbeit"; delete n.beleg; setRec(ds, isEmptyRec(cleanRec(n), ds) ? null : cleanRec(n)); }
       closeSheet(); toast("Abwesenheit gelöscht."); render(); break;
     }
-    case "backup": await offerFile(`Stempeluhr_Sicherung_${todayDs()}.json`, JSON.stringify({ app: "stempeluhr", version: 1, exportedAt: new Date().toISOString(), ...S }, null, 1)); break;
+    case "backup": await offerFile(`Stempeluhr_Sicherung_${todayDs()}.json`, JSON.stringify({ app: "stempeluhr", version: 1, exportedAt: new Date().toISOString(), ...S, skizzen: skLoad() }, null, 1)); break;
     case "import": if (window.AndroidBridge) { AndroidBridge.openFile(); break; } $("import-file").value = ""; $("import-file").click(); break;
     case "wipe":
       openSheet(`<h3>Wirklich alle Daten löschen?</h3><p class="sub">Das kann nicht rückgängig gemacht werden. Lade vorher eine Sicherung herunter, wenn du die Zeiten noch brauchst.</p>
@@ -2580,6 +2707,7 @@ $("import-file").addEventListener("change", e => {
 window.__onImport = () => { const t = window.AndroidBridge && AndroidBridge.getImported(); if (t) importText(t); };
 window.__onBack = () => {
   if (!$("print-root").hidden) { closeNachweis(); return; }
+  if ($("sk-root")) { skClose(); return; }
   if ($("sheet-root").innerHTML) { closeSheet(); return; }
   if (tab !== "heute") { tab = "heute"; render(); window.scrollTo(0, 0); return; }
   if (window.AndroidBridge) AndroidBridge.exit();
@@ -2591,6 +2719,7 @@ function importText(text) {
       const now = Date.now();
       S.settings = { ...defaultSettings(), ...(p.settings || {}), updatedAt: now };
       for (const mk in p.months) S.months[mk] = { days: p.months[mk].days || {}, updatedAt: now };
+      if (p.skizzen && typeof p.skizzen === "object") skStore({ ...skLoad(), ...p.skizzen });
       saveLocal(); scheduleRemote("settings"); for (const mk in S.months) scheduleRemote("m-" + mk);
       toast("Sicherung eingespielt."); render();
     } catch (x) { toast("Diese Datei ist keine Stempeluhr-Sicherung."); }
