@@ -1,5 +1,5 @@
-// Stempeluhr Offline-Cache (Version a0b8f0f8b6)
-const CACHE = "stempeluhr-a0b8f0f8b6";
+// Stempeluhr Offline-Cache (Version e4bdff6345)
+const CACHE = "stempeluhr-e4bdff6345";
 const FILES = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png", "icon-maskable.png", "apple-touch-icon.png", "fonts/f1.woff2", "fonts/f2.woff2", "fonts/f3.woff2", "fonts/f4.woff2", "fonts/f5.woff2", "fonts/f6.woff2"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });

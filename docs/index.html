@@ -330,6 +330,7 @@ button { cursor: pointer; }
 .bs-done { margin-top: 10px; }
 .bs-done summary { font-size: 13px; color: var(--muted); cursor: pointer; padding: 6px 0; }
 .bs-foot { display: flex; justify-content: flex-end; margin-top: 8px; }
+.bs-by { display: inline-block; margin-left: 6px; font-size: 11.5px; font-weight: 600; color: var(--blue); background: var(--blue-soft); border-radius: 6px; padding: 0 5px; vertical-align: 1px; }
 .sk-thumbs { display: flex; gap: 8px; overflow-x: auto; padding: 8px 0 4px; }
 .sk-th { flex: none; width: 92px; height: 138px; border-radius: 10px; border: 1px solid var(--line); padding: 0; background: #fff; overflow: hidden; }
 .sk-th img { width: 100%; height: 100%; display: block; }
@@ -643,7 +644,7 @@ async function connect() {
         if ((S.settings.updatedAt || 0) > (remote.has("settings") ? remote.get("settings") : -1)) scheduleRemote("settings");
       }
       setSync("cloud");
-      if (!closedOnce) { closedOnce = true; mergeDefaultKunden(); repairKunden(); assignNumbers(); closeMonths(); changed = true; }
+      if (!closedOnce) { closedOnce = true; mergeDefaultKunden(); repairKunden(); assignNumbers(); migrateBaust(); closeMonths(); changed = true; }
       if (changed) { saveLocal(); render(); }
     }, () => { dbCol = null; setSync("local"); });
   } catch (e) { setSync("local"); }
@@ -941,19 +942,31 @@ let viewYear = +todayDs().slice(0, 4);
 let lastUndo = null;
 
 /* ---------- Fotos pro Tag (nur auf diesem Handy, in IndexedDB; localStorage wäre zu klein) ---------- */
-let fotoDbP = null, fotoTarget = null;
+let fotoDbP = null, fotoTarget = null, fotoTargetK = null;
 function fotoDb() {
   if (!fotoDbP) fotoDbP = new Promise((res, rej) => {
-    const rq = indexedDB.open("stempeluhr-fotos", 1);
-    rq.onupgradeneeded = () => { const st = rq.result.createObjectStore("fotos", { keyPath: "id" }); st.createIndex("ds", "ds"); };
+    const rq = indexedDB.open("stempeluhr-fotos", 2);
+    rq.onupgradeneeded = () => {
+      const db = rq.result, st = db.objectStoreNames.contains("fotos") ? rq.transaction.objectStore("fotos") : db.createObjectStore("fotos", { keyPath: "id" });
+      if (!st.indexNames.contains("ds")) st.createIndex("ds", "ds");
+      if (!st.indexNames.contains("k")) st.createIndex("k", "k");
+    };
     rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error || new Error("Fotospeicher nicht verfügbar"));
   }).catch(e => { fotoDbP = null; throw e; });
   return fotoDbP;
 }
 async function fotoTx(mode, fn) { const db = await fotoDb(); return new Promise((res, rej) => { const tx = db.transaction("fotos", mode), st = tx.objectStore("fotos"); const r = fn(st); tx.oncomplete = () => res(r && r.result); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error || new Error("abgebrochen")); }); }
-const fotoList = ds => fotoTx("readonly", st => st.index("ds").getAll(ds)).then(l => (l || []).sort((a, b) => a.at - b.at));
+const fotoOk = l => (l || []).filter(f => !f.del && !f.need).sort((a, b) => a.at - b.at);
+const fotoList = ds => fotoTx("readonly", st => st.index("ds").getAll(ds)).then(fotoOk);
+const fotoListK = k => fotoTx("readonly", st => st.index("k").getAll(k)).then(fotoOk);
 const fotoGet = id => fotoTx("readonly", st => st.get(id));
-const fotoDel = id => fotoTx("readwrite", st => st.delete(id));
+const fotoPut = rec => fotoTx("readwrite", st => st.put(rec));
+// Fotos einer Baustelle (k) werden mit der Firma geteilt: Löschen hinterlässt eine Markierung für den Abgleich
+async function fotoDel(id) {
+  const f = await fotoGet(id); if (!f) return;
+  if (f.k) { await fotoPut({ id, ds: f.ds, k: f.k, kname: f.kname, by: f.by, at: nextAt(f.at), del: true }); tmFotoDirty(id); }
+  else await fotoTx("readwrite", st => st.delete(id));
+}
 // Foto verkleinern (max. 1600 px, JPEG). Mehrere Wege, weil Handy-Browser große Kamerabilder
 // unterschiedlich gut dekodieren; klappt keiner, wird das Original gespeichert.
 async function fotoDecode(file) {
@@ -982,7 +995,8 @@ async function fotoShrink(file) {
 }
 // Gespeichert wird ArrayBuffer + Typ statt Blob: manche Android-Browser können Blobs nicht in IndexedDB schreiben.
 const fotoBlob = f => f.blob || new Blob([f.data], { type: f.type || "image/jpeg" });
-async function fotoAddFiles(files, ds) {
+async function fotoAddFiles(files, ds, k) {
+  const kname = k ? bsLabelOf(k, (bsAll()[k] || {}).name) : "";
   let n = 0, fehler = null;
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (e) {}
   for (const f of files) {
@@ -991,10 +1005,12 @@ async function fotoAddFiles(files, ds) {
     try {
       const blob = await fotoShrink(f); step = "lesen";
       const data = await blob.arrayBuffer(), at = Date.now() + n; step = "speichern";
-      await fotoTx("readwrite", st => st.put({ id: `${ds}-${at}-${Math.random().toString(36).slice(2, 8)}`, ds, at, type: blob.type || "image/jpeg", data })); n++;
+      const id = `${ds}-${at}-${Math.random().toString(36).slice(2, 8)}`;
+      await fotoTx("readwrite", st => st.put(k ? { id, ds, at, type: blob.type || "image/jpeg", data, k, kname, by: myName() } : { id, ds, at, type: blob.type || "image/jpeg", data })); n++;
+      if (k) tmFotoDirty(id);
     } catch (e) { fehler = { step, e }; }
   }
-  if (n) toast(`${n} Foto${n === 1 ? "" : "s"} für ${fmtShort(ds)} gespeichert.`);
+  if (n) toast(`${n} Foto${n === 1 ? "" : "s"} ${k ? `bei ${kname}` : `für ${fmtShort(ds)}`} gespeichert.${k && tmOn() ? " Wird mit der Firma geteilt." : ""}`);
   if (fehler) {
     const e = fehler.e || {}, voll = e.name === "QuotaExceededError";
     toast(voll ? "Foto nicht gespeichert: Der Speicher für die App ist voll. Bitte alte Fotos löschen." : `Foto konnte nicht gespeichert werden (${fehler.step}: ${e.name || "Fehler"} ${e.message || ""}). Bitte Screenshot davon schicken.`);
@@ -1004,14 +1020,15 @@ async function fotoAddFiles(files, ds) {
 // Letzter Tag vor ds mit Fotos (max. 14 Tage zurück), für „Von gestern“
 async function fotoVortag(ds) { for (let i = 1; i <= 14; i++) { const d = addDays(ds, -i), l = await fotoList(d); if (l.length) return { ds: d, list: l }; } return null; }
 const fotoStrip = (ds, add = true) => `<div class="foto-strip" data-fds="${ds}" data-add="${add ? 1 : 0}"></div>`;
+const fotoStripK = k => `<div class="foto-strip" data-fk="${esc(k)}" data-fds="${todayDs()}" data-add="1"></div>`;
 const thumbUrls = new Map();
 async function hydrateFotos(all) {
   if (!window.indexedDB) return;
   for (const el of document.querySelectorAll(all ? ".foto-strip" : ".foto-strip:not([data-done])")) {
     el.dataset.done = "1";
-    const ds = el.dataset.fds, list = await fotoList(ds).catch(() => []);
+    const ds = el.dataset.fds, fk = el.dataset.fk, list = await (fk ? fotoListK(fk) : fotoList(ds)).catch(() => []);
     el.innerHTML = list.map(f => { let u = thumbUrls.get(f.id); if (!u) { u = URL.createObjectURL(fotoBlob(f)); thumbUrls.set(f.id, u); } return `<button type="button" class="foto-th" data-act="fotoview" data-id="${esc(f.id)}" aria-label="Foto ansehen"><img src="${u}" alt=""></button>`; }).join("")
-      + (el.dataset.add === "1" ? `<button type="button" class="foto-th foto-add" data-act="fotoadd" data-ds="${ds}" aria-label="Foto hinzufügen">📷<span>Foto</span></button>` : "")
+      + (el.dataset.add === "1" ? `<button type="button" class="foto-th foto-add" data-act="fotoadd" data-ds="${ds}"${fk ? ` data-k="${esc(fk)}"` : ""} aria-label="Foto hinzufügen">📷<span>Foto</span></button>${fk ? `<button type="button" class="foto-th foto-add" data-act="fotogal" data-ds="${ds}" data-k="${esc(fk)}" aria-label="Foto aus Galerie">🖼️<span>Galerie</span></button>` : ""}` : "")
       + (!list.length && el.dataset.add !== "1" ? `<span class="hint">Keine Fotos.</span>` : "");
   }
   for (const el of document.querySelectorAll(".foto-vortag:not([data-done])")) {
@@ -1024,7 +1041,7 @@ new MutationObserver(() => { if (document.querySelector(".foto-strip:not([data-d
 async function openFoto(id) {
   const f = await fotoGet(id); if (!f) return;
   const u = thumbUrls.get(id) || URL.createObjectURL(fotoBlob(f)); thumbUrls.set(id, u);
-  openSheet(`<h3>Foto vom ${fmtShort(f.ds)} ${f.ds.slice(0, 4)}</h3><p class="sub">Aufgenommen ${new Date(f.at).toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" })} Uhr</p>
+  openSheet(`<h3>Foto vom ${fmtShort(f.ds)} ${f.ds.slice(0, 4)}</h3><p class="sub">Aufgenommen ${new Date(f.at).toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" })} Uhr${f.k ? ` · ${esc(f.kname || f.k)}` : ""}${f.by && f.by !== myName() ? ` · von ${esc(f.by)}` : ""}</p>
     <img class="foto-big" src="${u}" alt="Foto vom ${fmtShort(f.ds)}">
     <div class="sheet-actions"><button class="btn primary grow" data-act="fotoshare" data-id="${esc(id)}">Teilen</button><button class="btn grow" data-act="fotodel" data-id="${esc(id)}" style="color:var(--danger)">Löschen</button></div>
     <button class="btn ghost" style="width:100%" data-act="closesheet-btn">Schließen</button>`);
@@ -1033,11 +1050,11 @@ function fotoCard(ds) {
   if (!on("fotos")) return "";
   if (window.AndroidBridge) return "";
   return `<section class="card"><div class="row"><h2 style="margin:0">Fotos</h2><button class="btn" data-act="fotogal" data-ds="${ds}">Aus Galerie</button></div>
-    <p class="hint" style="margin:6px 0 8px">Z. B. die Liste oder das Material für morgen. Die Fotos bleiben auf diesem Handy, mit „Teilen“ schickst du sie an Kollegen.</p>
+    <p class="hint" style="margin:6px 0 8px">Z. B. die Liste oder das Material für morgen. ${tmOn() ? "Läuft gerade ein Kundeneinsatz, gehört das Foto zu dieser Baustelle und eure Firma sieht es im Reiter Baustellen." : "Die Fotos bleiben auf diesem Handy, mit „Teilen“ schickst du sie an Kollegen."}</p>
     ${fotoStrip(ds)}<div class="foto-vortag" data-ds="${ds}"></div></section>`;
 }
 // fotoTarget kann nach dem Kamera-Wechsel verloren sein (Seite neu geladen) → dann heute
-for (const id of ["foto-cam", "foto-file"]) $(id).addEventListener("change", e => { const fs = [...e.target.files]; e.target.value = ""; if (fs.length) fotoAddFiles(fs, fotoTarget || todayDs()).catch(x => toast(`Foto konnte nicht gespeichert werden (${(x && x.name) || "Fehler"} ${(x && x.message) || ""}).`)); });
+for (const id of ["foto-cam", "foto-file"]) $(id).addEventListener("change", e => { const fs = [...e.target.files]; e.target.value = ""; if (fs.length) fotoAddFiles(fs, fotoTarget || todayDs(), fotoTargetK).catch(x => toast(`Foto konnte nicht gespeichert werden (${(x && x.name) || "Fehler"} ${(x && x.message) || ""}).`)); });
 
 function render() {
   if (tab === "baust" && !on("baust")) tab = "heute";
@@ -1465,6 +1482,14 @@ function viewProfil() {
     ${ohne.length ? `<p class="hint" style="margin:10px 0 0"><b>${ohne.length} ${ohne.length === 1 ? "Kunde" : "Kunden"} ohne Nummer:</b> ${ohne.slice(0, 8).map(esc).join(", ")}${ohne.length > 8 ? " …" : ""}. In der Kundenliste kannst du Nummern zuordnen.</p>` : ""}
   </section>`; })()}
   <section class="card">
+    <h2>Mit Kollegen teilen</h2>
+    <p class="hint" style="margin:0 0 10px">Alle in der Firma tragen denselben <b>Firmencode</b> ein. Dann seht ihr gegenseitig im Reiter Baustellen die offenen Arbeiten, das Material, die Zeichnungen und die Fotos. <b>Stunden und Verdienst bleiben nur auf deinem Handy.</b> Der Code ist wie ein Passwort: nur an Kollegen weitergeben, mindestens 10 Zeichen mit Zahlen.</p>
+    <div class="field"><label for="tm-code">Firmencode</label><input id="tm-code" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(S.settings.firmencode || "")}" placeholder="z. B. Mayr-Tischlerei-48-Haus7"></div>
+    <p class="hint" style="margin:6px 0 10px">Andere sehen deine Einträge mit deinem Namen: <b>${esc(myName())}</b>${S.settings.name ? "" : " (oben bei Name eintragen)"}.</p>
+    ${tmOn() ? tmStatusLine() : ""}
+    <div class="btn-row"><button class="btn primary grow" data-act="tmsave">${tmOn() ? "Code ändern" : "Verbinden"}</button>${tmOn() ? `<button class="btn grow" data-act="tmoff">Nicht mehr teilen</button>` : ""}</div>
+  </section>
+  <section class="card">
     <h2>Datensicherung</h2>
     <p class="hint" style="margin:0 0 12px">${syncMode === "device" ? "Deine Zeiten sind nur auf diesem Handy gespeichert. Wenn du die App löschst oder das Handy wechselst, sind sie weg. Lade deshalb regelmäßig eine Sicherung herunter, zum Beispiel einmal im Monat." : syncMode === "cloud" ? "Deine Zeiten werden automatisch in deinem Claude-Konto gesichert und sind auf jedem Gerät verfügbar, auf dem du angemeldet bist." : "Deine Zeiten sind gerade nur auf diesem Gerät gespeichert. Lade regelmäßig eine Sicherung herunter."}</p>
     <div class="btn-row">
@@ -1641,46 +1666,68 @@ function addKaffee(min, ds = todayDs(), at = nowHM()) {
   setRec(ds, r); try { navigator.vibrate && navigator.vibrate(30); } catch (e) {}
   toast(`Kaffeepause ${min} Min.${ds !== todayDs() ? " am " + fmtShort(ds) : ""} um ${at} eingetragen`, true); render();
 }
-// Materialliste gehört zum Kunden (nicht zum einzelnen Einsatz), damit sie beim nächsten Besuch da ist
+// Materialliste gehört zum Kunden (nicht zum einzelnen Einsatz), damit sie beim nächsten Besuch da ist.
 const matKey = n => { const rk = resolveKunde(n); return rk.nr ? "#" + rk.nr : normName(rk.name); };
 const matNames = rk => { const e = rk.nr && kstamm()[rk.nr]; return [rk.name, ...(e ? [e.name, ...(e.alt || [])] : [])].map(normName); };
-const matOf = n => { const m = S.settings.mat || {}, rk = resolveKunde(n); if (rk.nr && m["#" + rk.nr]) return m["#" + rk.nr].text || ""; for (const x of matNames(rk)) if (m[x]) return m[x].text || ""; return ""; };
-function setMat(name, text) {
-  const m = { ...(S.settings.mat || {}) }, rk = resolveKunde(name), k = matKey(name);
-  for (const x of matNames(rk)) delete m[x];
-  if (text) m[k] = { name: kLabel(rk), text, at: Date.now() }; else delete m[k];
-  S.settings.mat = m; saveSettings();
-}
-/* ---------- Baustellen: was bei einer Baustelle noch offen ist (pro Kunde, bleibt bis abgehakt) ----------
-   S.settings.baust = { "<#nr oder name>": { name, items: [{ id, t, done, at }] } }. Material steht weiter in S.settings.mat. */
+/* ---------- Baustellen: was bei einer Baustelle noch offen ist und welches Material gebraucht wird ----------
+   S.settings.baust = { "<#nr oder name>": { name, at, manual, hid, items: [{ id, kind: "todo"|"mat", t, done, del, at, by, p }] } }
+   del = gelöscht (bleibt als Markierung für den Abgleich mit der Firma), p = zuletzt übertragener Stand (= at). */
+const myName = () => (S.settings.name || "").trim() || "Ohne Name";
+const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const bsAll = () => S.settings.baust || {};
 function bsFind(label) { const b = bsAll(), rk = resolveKunde(label); if (rk.nr && b["#" + rk.nr]) return "#" + rk.nr; for (const x of matNames(rk)) if (b[x]) return x; return null; }
-const bsOpen = label => { const k = bsFind(label); return k ? (bsAll()[k].items || []).filter(i => !i.done) : []; };
-const matLines = label => matOf(label).split("\n").map(x => x.trim()).filter(Boolean);
+const bsLive = (key, kind) => ((bsAll()[key] || {}).items || []).filter(i => !i.del && (i.kind || "todo") === kind);
+const bsOpen = label => { const k = bsFind(label); return k ? bsLive(k, "todo").filter(i => !i.done) : []; };
+const matLines = label => { const k = bsFind(label); return k ? bsLive(k, "mat").filter(i => !i.done).map(i => i.t) : []; };
+const matOf = n => matLines(n).join("\n");
+function setMat(name, text) {
+  const want = String(text || "").split("\n").map(x => x.trim()).filter(Boolean), now = Date.now();
+  bsUpdate(name, e => {
+    const left = [...want];
+    e.items = e.items.map(i => { if (i.kind !== "mat" || i.del || i.done) return i; const j = left.indexOf(i.t); if (j >= 0) { left.splice(j, 1); return i; } return { ...i, del: true, at: nextAt(i.at) }; });
+    for (const t of left) e.items.push({ id: newId(), kind: "mat", t, done: false, at: now, by: myName() });
+  });
+}
 function bsLabelOf(key, fallback) {
   if (key.startsWith("#")) { const nr = key.slice(1), e = kstamm()[nr]; return kLabel({ nr, name: e ? e.name : stripNr(nr, String(fallback || "").replace(/^#?\d+\s*[·\-–:]?\s*/, "")) }); }
   return fallback || key;
 }
 function bsUpdate(label, fn) {
   const b = { ...bsAll() }, key = bsFind(label) || matKey(label), e = b[key] ? { ...b[key], items: [...(b[key].items || [])] } : { name: kLabel(resolveKunde(label)), items: [] };
-  fn(e); e.at = Date.now(); b[key] = e; S.settings.baust = b; saveSettings();
+  fn(e); e.at = Date.now(); if (e.items.some(i => !i.del)) e.hid = false; b[key] = e; S.settings.baust = b; saveSettings(); tmSoon();
+}
+// Neuer Stand immer später als der alte, auch wenn die Handy-Uhr eines Kollegen nachgeht
+const nextAt = old => Math.max(Date.now(), (old || 0) + 1);
+const bsItemSet = (label, id, ch) => bsUpdate(label, x => { x.items = x.items.map(i => i.id === id ? { ...i, ...ch, at: nextAt(i.at) } : i); });
+// Einmalig: alte Materialliste (Text je Kunde) in einzelne Zeilen übernehmen; alte Zeilen ohne Art sind „todo“
+function migrateBaust() {
+  if (S.settings.baustVer >= 2) return;
+  const b = { ...bsAll() }, now = Date.now();
+  for (const k in b) b[k] = { ...b[k], items: (b[k].items || []).map(i => ({ ...i, kind: i.kind || "todo", by: i.by || myName() })) };
+  for (const [key, m] of Object.entries(S.settings.mat || {})) {
+    const lines = String(m.text || "").split("\n").map(x => x.trim()).filter(Boolean); if (!lines.length) continue;
+    const label = bsLabelOf(key, m.name), rk = resolveKunde(label), k2 = rk.nr ? "#" + rk.nr : key;
+    const e = b[k2] ? { ...b[k2], items: [...b[k2].items] } : { name: label, items: [], at: m.at || now };
+    for (const t of lines) e.items.push({ id: newId(), kind: "mat", t, done: false, at: now, by: myName() });
+    b[k2] = e;
+  }
+  S.settings.baust = b; S.settings.baustVer = 2; saveSettings();
 }
 function viewBaust() {
   const today = todayDs(), r = getRec(today) || {}, cards = new Map();
   const add = (key, label, heute) => { const c = cards.get(key) || { key, label, heute: false, at: 0 }; if (heute) c.heute = true; if (label && !c.label) c.label = label; cards.set(key, c); return c; };
   for (const k of r.kunden || []) if (!isBetr(k) && (k.name || k.nr)) { const l = kLabel({ nr: k.nr, name: kCurName(k) }); add(bsFind(l) || matKey(l), l, true); }
-  for (const [key, e] of Object.entries(bsAll())) { const c = add(key, bsLabelOf(key, e.name)); c.at = Math.max(c.at, e.at || 0); }
-  for (const x of Object.values(skLoad())) if (x.k && !cards.has(x.k)) { const c = add(x.k, bsLabelOf(x.k, x.name)); c.at = Math.max(c.at, x.at || 0); }
-  for (const [key, e] of Object.entries(S.settings.mat || {})) if ((e.text || "").trim()) { const l = bsLabelOf(key, e.name), k2 = bsFind(l) || key; if (!cards.has(k2)) { const c = add(k2, l); c.at = Math.max(c.at, e.at || 0); } }
-  const list = [...cards.values()].map(c => ({ ...c, label: bsLabelOf(c.key, c.label), items: ((bsAll()[c.key] || {}).items || []) }))
-    .map(c => ({ ...c, open: c.items.filter(i => !i.done), done: c.items.filter(i => i.done), mat: matLines(c.label), sk: skFor(c.key) }))
+  for (const [key, e] of Object.entries(bsAll())) if (!e.hid && (e.manual || (e.items || []).some(i => !i.del))) { const c = add(key, bsLabelOf(key, e.name)); c.at = Math.max(c.at, e.at || 0); }
+  for (const x of Object.values(skLoad())) if (x.k && !x.del && !cards.has(x.k)) { const c = add(x.k, bsLabelOf(x.k, x.name)); c.at = Math.max(c.at, x.at || 0); }
+  const list = [...cards.values()].map(c => ({ ...c, label: bsLabelOf(c.key, c.label) }))
+    .map(c => ({ ...c, open: bsLive(c.key, "todo").filter(i => !i.done), mat: bsLive(c.key, "mat").filter(i => !i.done), done: [...bsLive(c.key, "todo"), ...bsLive(c.key, "mat")].filter(i => i.done).sort((a, b) => (b.at || 0) - (a.at || 0)), sk: skFor(c.key) }))
     .sort((a, b) => (b.heute - a.heute) || ((b.open.length + b.mat.length + b.sk.length > 0) - (a.open.length + a.mat.length + a.sk.length > 0)) || (b.at - a.at) || a.label.localeCompare(b.label, "de"));
-  const row = (c, it) => `<div class="bs-row${it.done ? " done" : ""}"><button class="bs-chk" data-act="bsdone" data-k="${esc(c.key)}" data-id="${esc(it.id)}" aria-label="${it.done ? "Wieder offen" : "Erledigt"}">${it.done ? "✓" : ""}</button><span class="bs-t" data-act="bsedit" data-k="${esc(c.key)}" data-id="${esc(it.id)}">${esc(it.t)}</span><button class="bs-x" data-act="bsdel" data-k="${esc(c.key)}" data-id="${esc(it.id)}" aria-label="Zeile löschen">×</button></div>`;
-  const mrow = (c, t, i) => `<div class="bs-row"><button class="bs-chk" data-act="bsmatdone" data-k="${esc(c.key)}" data-i="${i}" aria-label="Besorgt"></button><span class="bs-t" data-act="bsmatedit" data-k="${esc(c.key)}" data-i="${i}">${esc(t)}</span><button class="bs-x" data-act="bsmatdone" data-k="${esc(c.key)}" data-i="${i}" aria-label="Zeile löschen">×</button></div>`;
+  const row = (c, it) => `<div class="bs-row${it.done ? " done" : ""}"><button class="bs-chk" data-act="bsdone" data-k="${esc(c.key)}" data-id="${esc(it.id)}" aria-label="${it.done ? "Wieder offen" : "Erledigt"}">${it.done ? "✓" : ""}</button><span class="bs-t" data-act="bsedit" data-k="${esc(c.key)}" data-id="${esc(it.id)}">${it.done && it.kind === "mat" ? "📦 " : ""}${esc(it.t)}${it.by && it.by !== myName() ? `<small class="bs-by">${esc(it.by)}</small>` : ""}</span><button class="bs-x" data-act="bsdel" data-k="${esc(c.key)}" data-id="${esc(it.id)}" aria-label="Zeile löschen">×</button></div>`;
   const addLine = (c, kind, ph) => `<form class="bs-add" data-k="${esc(c.key)}" data-kind="${kind}"><input autocomplete="off" enterkeyhint="done" placeholder="${ph}" aria-label="${ph} bei ${esc(c.label)}"><button type="submit" aria-label="Zeile hinzufügen">+</button></form>`;
   const nrOf = l => { const m = l.match(/^(\d+) · (.*)$/); return m ? `<span class="knr">${esc(m[1])}</span> ${esc(m[2])}` : esc(l); };
   return `<section class="card"><h2>Baustellen</h2>
     <p class="hint" style="margin:4px 0 10px">Was bei welcher Baustelle noch offen ist und was beim nächsten Mal zu erledigen ist. Abhaken, wenn erledigt. Offene Punkte siehst du auch beim Stempeln, sobald du beim Kunden ankommst.</p>
+    ${tmStatusLine()}
     ${kdDatalist()}<form class="bs-add" id="bs-neu" style="border-bottom-style:solid"><input id="bs-neu-in" list="kd-list" autocomplete="off" enterkeyhint="done" placeholder="Neue Baustelle: Nr. oder Name" aria-label="Baustelle hinzufügen"><button type="submit" aria-label="Baustelle hinzufügen">+</button></form>
   </section>
   ${list.length ? list.map(c => `<section class="card bs" data-k="${esc(c.key)}">
@@ -1688,7 +1735,8 @@ function viewBaust() {
     <div class="bs-lbl">Noch zu erledigen</div>
     ${c.open.map(it => row(c, it)).join("")}${addLine(c, "todo", "Neue Zeile …")}
     <div class="bs-lbl">Material fürs nächste Mal</div>
-    ${c.mat.map((t, i) => mrow(c, t, i)).join("")}${addLine(c, "mat", "Material …")}
+    ${c.mat.map(it => row(c, it)).join("")}${addLine(c, "mat", "Material …")}
+    ${on("fotos") && !window.AndroidBridge ? `<div class="bs-lbl">Fotos</div>${fotoStripK(c.key)}` : ""}
     <div class="bs-lbl">Zeichnungen</div>
     <div class="sk-thumbs">${c.sk.map(x => `<button type="button" class="sk-th" data-act="skopen" data-k="${esc(c.key)}" data-id="${esc(x.id)}" aria-label="Zeichnung öffnen"><img src="${skThumb(x)}" alt=""></button>`).join("")}<button type="button" class="sk-th sk-new" data-act="skopen" data-k="${esc(c.key)}" aria-label="Neue Zeichnung"><span>+</span>Zeichnung</button></div>
     ${c.done.length ? `<details class="bs-done"><summary>Erledigt (${c.done.length})</summary>${c.done.map(it => row(c, it)).join("")}</details>` : ""}
@@ -1703,29 +1751,154 @@ document.addEventListener("submit", e => {
   const inp = f.querySelector("input"), t = inp.value.trim(); if (!t) return;
   if (f.id === "bs-neu") {
     const rk = resolveKunde(t); learnKunde(rk); const label = kLabel({ nr: rk.nr, name: rk.nr && kstamm()[rk.nr] ? kstamm()[rk.nr].name : rk.name });
-    if (!bsFind(label)) bsUpdate(label, () => {});
+    bsUpdate(label, x => { x.manual = true; x.hid = false; });
     render(); const k = bsFind(label); const fi = k && document.querySelector(`.bs-add[data-k="${CSS.escape(k)}"][data-kind="todo"] input`); if (fi) { fi.closest(".bs").scrollIntoView({ block: "start" }); fi.focus({ preventScroll: true }); }
     return;
   }
   const key = f.dataset.k, label = bsLabelByKey(key);
-  if (f.dataset.kind === "mat") setMat(label, [...matLines(label), t].join("\n"));
-  else bsUpdate(label, x => x.items.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), t, done: false, at: Date.now() }));
+  bsUpdate(label, x => x.items.push({ id: newId(), kind: f.dataset.kind === "mat" ? "mat" : "todo", t, done: false, at: Date.now(), by: myName() }));
   bsRefocus(bsFind(label) || key, f.dataset.kind);
 }, true);
 function bsAct(act, el) {
-  const key = el.dataset.k, label = bsLabelByKey(key), id = el.dataset.id;
-  if (act === "bsdone") { bsUpdate(label, x => { x.items = x.items.map(i => i.id === id ? { ...i, done: !i.done, doneAt: Date.now() } : i); }); render(); }
-  else if (act === "bsdel") { const it = ((bsAll()[key] || {}).items || []).find(i => i.id === id); if (it && !confirm(`„${it.t}“ löschen?`)) return; bsUpdate(label, x => { x.items = x.items.filter(i => i.id !== id); }); render(); }
-  else if (act === "bsedit") { const it = ((bsAll()[key] || {}).items || []).find(i => i.id === id); if (!it) return; const v = prompt("Zeile ändern", it.t); if (v == null) return; const t = v.trim(); bsUpdate(label, x => { x.items = t ? x.items.map(i => i.id === id ? { ...i, t } : i) : x.items.filter(i => i.id !== id); }); render(); }
-  else if (act === "bsmatdone") { const l = matLines(label); l.splice(+el.dataset.i, 1); setMat(label, l.join("\n")); render(); }
-  else if (act === "bsmatedit") { const l = matLines(label), i = +el.dataset.i, v = prompt("Material ändern", l[i]); if (v == null) return; if (v.trim()) l[i] = v.trim(); else l.splice(i, 1); setMat(label, l.join("\n")); render(); }
-  else if (act === "bsrm") { const b = { ...bsAll() }; delete b[key]; S.settings.baust = b; saveSettings(); render(); }
+  const key = el.dataset.k, label = bsLabelByKey(key), id = el.dataset.id, it = ((bsAll()[key] || {}).items || []).find(i => i.id === id);
+  if (act === "bsdone") { if (it) bsItemSet(label, id, { done: !it.done }); render(); }
+  else if (act === "bsdel") { if (it && !confirm(`„${it.t}“ löschen?${tmOn() ? " Es wird auch bei den Kollegen gelöscht." : ""}`)) return; bsItemSet(label, id, { del: true }); render(); }
+  else if (act === "bsedit") { if (!it) return; const v = prompt("Zeile ändern", it.t); if (v == null) return; const t = v.trim(); bsItemSet(label, id, t ? { t } : { del: true }); render(); }
+  else if (act === "bsrm") { bsUpdate(label, x => { x.items = x.items.map(i => i.del ? i : { ...i, del: true, at: nextAt(i.at) }); x.manual = false; }); const b = { ...bsAll() }; if (b[key]) b[key] = { ...b[key], hid: true }; S.settings.baust = b; saveSettings(); render(); }
 }
+/* ---------- Mit der Firma teilen: Baustellen-Zeilen, Zeichnungen und Baustellen-Fotos über Supabase ----------
+   Stundendaten bleiben auf dem Handy. Lesen und schreiben geht nur mit dem Firmencode (Server speichert nur dessen Hash). */
+const SB_URL = "https://ajozoqgytbuflgiylfjk.supabase.co", SB_KEY = "sb_publishable__QfJMR51r9hiKPY0fL_3_Q_1hGKn2Ar";
+const TM_KEY = "stempeluhr.team";
+const tmCode = () => String(S.settings.firmencode || "").trim();
+const tmOn = () => tmCode().length >= 10;
+function tmState() { try { return JSON.parse(localStorage.getItem(TM_KEY) || "{}") || {}; } catch (e) { return {}; } }
+function tmSetState(ch) { try { localStorage.setItem(TM_KEY, JSON.stringify({ ...tmState(), ...ch })); } catch (e) {} }
+function tmFotoDirty(id) { const st = tmState(), l = st.fotos || []; if (!l.includes(id)) tmSetState({ fotos: [...l, id] }); tmSoon(); }
+async function sbRpc(fn, args) {
+  const r = await fetch(`${SB_URL}/rest/v1/rpc/${fn}`, { method: "POST", headers: { apikey: SB_KEY, "Content-Type": "application/json" }, body: JSON.stringify(args) });
+  if (!r.ok) { let t = ""; try { t = (await r.text()).slice(0, 160); } catch (e) {} throw new Error(`Server ${r.status}${t ? ": " + t : ""}`); }
+  return r.json();
+}
+let tmBusy = false, tmTimer = 0, tmPending = false;
+function tmSoon(ms = 2500) { if (!tmOn()) return; clearTimeout(tmTimer); tmTimer = setTimeout(() => tmSync(), ms); }
+// Läuft gerade ein Kundeneinsatz (nicht Betrieb), gehört ein Foto von heute zu dieser Baustelle
+function fotoAutoK(ds) {
+  if (ds && ds !== todayDs()) return null;
+  const k = ((getRec(todayDs()) || {}).kunden || []).filter(x => x.from && !x.to && !isBetr(x) && (x.name || x.nr)).pop();
+  if (!k) return null; const l = kLabel({ nr: k.nr, name: kCurName(k) }); return bsFind(l) || matKey(l);
+}
+function tmRows() {
+  const rows = [];
+  for (const [key, e] of Object.entries(bsAll())) for (const it of e.items || []) if (it.p !== it.at)
+    rows.push({ id: it.id, art: it.kind === "mat" ? "mat" : "todo", knr: key, kname: bsLabelOf(key, e.name), daten: { t: it.t, done: !!it.done }, von: it.by || myName(), at: it.at || 1, geloescht: !!it.del });
+  for (const [id, x] of Object.entries(skLoad())) if (x.k && x.p !== x.at)
+    rows.push({ id, art: "skizze", knr: x.k, kname: x.name || "", daten: { items: x.items || [], c: x.c || x.at }, von: x.by || myName(), at: x.at || 1, geloescht: !!x.del });
+  return rows;
+}
+function tmMarkPushed(rows) {
+  const ids = new Map(rows.map(r => [r.id, r.at]));
+  const b = { ...bsAll() };
+  for (const k in b) b[k] = { ...b[k], items: (b[k].items || []).map(i => ids.get(i.id) === i.at ? { ...i, p: i.at } : i) };
+  S.settings.baust = b;
+  const all = skLoad(); for (const id in all) if (ids.get(id) === all[id].at) all[id].p = all[id].at; skStore(all);
+}
+function tmMerge(r) {
+  if (r.art === "todo" || r.art === "mat") {
+    const b = { ...bsAll() }, e = b[r.knr] ? { ...b[r.knr], items: [...(b[r.knr].items || [])] } : { name: r.kname || r.knr, items: [], at: r.at };
+    const i = e.items.findIndex(x => x.id === r.id), loc = i >= 0 ? e.items[i] : null;
+    if (loc && (loc.at || 0) > r.at) return false;
+    const d = r.daten || {}, it = { id: r.id, kind: r.art, t: String(d.t || ""), done: !!d.done, del: !!r.geloescht, at: r.at, by: r.von || "", p: r.at };
+    if (loc && loc.p === r.at && loc.at === r.at) return false;
+    if (loc) e.items[i] = it; else e.items.push(it);
+    if (!it.del) e.hid = false;
+    b[r.knr] = e; S.settings.baust = b; return true;
+  }
+  if (r.art === "skizze") {
+    const all = skLoad(), loc = all[r.id];
+    if (loc && ((loc.at || 0) > r.at || (loc.p === r.at && loc.at === r.at))) return false;
+    const d = r.daten || {};
+    all[r.id] = { k: r.knr, name: r.kname || "", c: d.c || r.at, at: r.at, items: r.geloescht ? [] : (d.items || []), del: !!r.geloescht, by: r.von || "", p: r.at };
+    skStore(all); return true;
+  }
+  return false;
+}
+async function tmMergeFoto(r) {
+  const loc = await fotoGet(r.id).catch(() => null);
+  if (loc && (loc.at || 0) > r.at) return false;
+  if (r.geloescht) { if (loc && !loc.del) { await fotoPut({ id: r.id, ds: loc.ds, k: r.knr, at: r.at, del: true, p: r.at }); return true; } return false; }
+  if (loc && !loc.need) { if (loc.p !== r.at) await fotoPut({ ...loc, p: r.at }); return false; }
+  await fotoPut({ id: r.id, ds: (r.daten || {}).ds || todayDs(), at: r.at, k: r.knr, kname: r.kname || "", by: r.von || "", type: "image/jpeg", need: true, p: r.at });
+  return true;
+}
+async function fotoForUpload(f) {
+  let blob = fotoBlob(f);
+  if (blob.size > 450000) { try { const img = await fotoDecode(blob), w = img.naturalWidth || img.width, h = img.naturalHeight || img.height, k = Math.min(1, 1280 / Math.max(w, h)), cv = document.createElement("canvas"); cv.width = Math.round(w * k); cv.height = Math.round(h * k); cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height); const b2 = await new Promise(res => cv.toBlob(res, "image/jpeg", .75)); if (b2 && b2.size) blob = b2; } catch (e) {} }
+  return new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(fr.error); fr.readAsDataURL(blob); });
+}
+async function tmSync(manual) {
+  if (!tmOn()) return;
+  if (tmBusy) { tmPending = true; return; }
+  if (navigator.onLine === false) { tmSetState({ err: "Kein Internet. Wird abgeglichen, sobald wieder Netz da ist." }); if (manual) toast("Kein Internet. Der Abgleich folgt automatisch."); return; }
+  tmBusy = true; let changed = false, pushed = 0, pulled = 0;
+  const code = tmCode();
+  try {
+    // 1. Eigene Änderungen senden
+    const rows = tmRows();
+    for (let i = 0; i < rows.length; i += 40) { const part = rows.slice(i, i + 40); await sbRpc("su_push", { code, zeilen: part }); tmMarkPushed(part); pushed += part.length; }
+    if (rows.length) saveSettings();
+    const fl = [...(tmState().fotos || [])];
+    for (const id of fl) {
+      const f = await fotoGet(id).catch(() => null);
+      if (f && f.k) {
+        const row = { id, art: "foto", knr: f.k, kname: f.kname || bsLabelOf(f.k, ""), daten: { ds: f.ds }, von: f.by || myName(), at: f.at, geloescht: !!f.del };
+        if (!f.del && !f.need) row.bild = await fotoForUpload(f);
+        await sbRpc("su_push", { code, zeilen: [row] }); await fotoPut({ ...f, p: f.at }); pushed++;
+      }
+      tmSetState({ fotos: (tmState().fotos || []).filter(x => x !== id) });
+    }
+    // 2. Änderungen der Kollegen holen (Server-Zähler, damit falsche Handy-Uhren nichts verschlucken)
+    let seit = tmState().code === code ? (tmState().seit || 0) : 0;
+    for (let guard = 0; guard < 50; guard++) {
+      const got = await sbRpc("su_pull", { code, seit });
+      for (const r of got) { if (r.art === "foto") { if (await tmMergeFoto(r)) changed = true; } else if (tmMerge(r)) changed = true; seit = Math.max(seit, r.srv); pulled++; }
+      tmSetState({ seit, code });
+      if (got.length < 300) break;
+    }
+    if (changed) saveSettings();
+    // 3. Fehlende Fotos der Kollegen laden (höchstens 12 pro Durchgang)
+    const need = await fotoTx("readonly", st => st.getAll()).then(l => (l || []).filter(f => f.need && !f.del).slice(0, 12)).catch(() => []);
+    for (const f of need) {
+      const url = await sbRpc("su_bild", { code, eid: f.id });
+      if (typeof url === "string" && url.startsWith("data:")) { const buf = await (await fetch(url)).arrayBuffer(); await fotoPut({ ...f, data: buf, need: false, type: url.slice(5, url.indexOf(";")) || "image/jpeg" }); changed = true; }
+    }
+    tmSetState({ last: Date.now(), err: "" });
+    if (manual) toast(`Abgeglichen: ${pushed} gesendet, ${pulled} empfangen.`);
+  } catch (e) {
+    tmSetState({ err: (e && e.message) || "Fehler beim Abgleich" });
+    if (manual) toast(`Abgleich hat nicht geklappt: ${(e && e.message) || "Fehler"}`);
+  } finally {
+    tmBusy = false;
+    const busyInput = document.activeElement && document.activeElement.closest && document.activeElement.closest(".bs-add,.field") && document.activeElement.value;
+    if ((changed || manual) && !$("sk-root") && !$("sheet-root").innerHTML && !busyInput && (tab === "baust" || tab === "heute" || tab === "profil")) render();
+    else if (changed) hydrateFotos(true);
+    if (tmPending) { tmPending = false; tmSoon(500); }
+  }
+}
+function tmStatusLine() {
+  if (!tmOn()) return `<p class="hint" style="margin:0 0 10px">🔒 Nur auf diesem Handy. Mit einem <b>Firmencode</b> im Profil seht ihr die Baustellen, Zeichnungen und Fotos gegenseitig.</p>`;
+  const st = tmState();
+  return `<p class="hint" style="margin:0 0 10px">${st.err ? `⚠️ ${esc(st.err)}` : st.last ? `👥 Mit der Firma geteilt · zuletzt abgeglichen ${new Date(st.last).toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" })} Uhr` : "👥 Mit der Firma geteilt · wird abgeglichen …"} <button class="btn ghost" data-act="tmsync" style="min-height:0;padding:2px 8px">Jetzt abgleichen</button></p>`;
+}
+setInterval(() => { if (tmOn() && document.visibilityState === "visible") tmSync(); }, 60000);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") tmSoon(800); });
+window.addEventListener("online", () => tmSoon(800));
+
 /* ---------- Zeichnungen pro Baustelle (Vektor, eigener localStorage-Schlüssel; Teilen als PNG) ---------- */
 const SK_KEY = "stempeluhr.skizzen", SKW = 1000, SKH = 1500, SK_GRID = 40;
 function skLoad() { try { return JSON.parse(localStorage.getItem(SK_KEY) || "{}") || {}; } catch (e) { return {}; } }
 function skStore(o) { try { localStorage.setItem(SK_KEY, JSON.stringify(o)); return true; } catch (e) { toast("Zeichnung nicht gespeichert: Der Speicher ist voll."); return false; } }
-const skFor = key => Object.entries(skLoad()).filter(([, x]) => x.k === key).map(([id, x]) => ({ id, ...x })).sort((a, b) => a.c - b.c);
+const skFor = key => Object.entries(skLoad()).filter(([, x]) => x.k === key && !x.del).map(([id, x]) => ({ id, ...x })).sort((a, b) => a.c - b.c);
 function skPaint(g, items, sc, cur) {
   g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.scale(sc, sc);
   g.fillStyle = "#fff"; g.fillRect(0, 0, SKW, SKH);
@@ -1805,8 +1978,10 @@ function openSkizze(key, label, id) {
 function skRedraw() { const cv = $("sk-cv"); if (cv && sk) skPaint(cv.getContext("2d"), sk.items, sk.sc, sk.cur); }
 function skSave() {
   const all = skLoad();
-  if (sk.items.length) all[sk.id] = { k: sk.key, name: sk.label, c: sk.c, at: Date.now(), items: sk.items }; else delete all[sk.id];
-  skStore(all); skRedraw();
+  const at = nextAt(all[sk.id] && all[sk.id].at);
+  if (sk.items.length) all[sk.id] = { k: sk.key, name: sk.label, c: sk.c, at, items: sk.items, by: (all[sk.id] && all[sk.id].by) || myName() };
+  else if (all[sk.id]) all[sk.id] = { k: sk.key, name: sk.label, c: sk.c, at, items: [], del: true };
+  skStore(all); skRedraw(); tmSoon();
 }
 function skClose() { if (sk && sk.fit) window.removeEventListener("resize", sk.fit); const r = $("sk-root"); if (r) r.remove(); sk = null; render(); }
 async function skAct(act, el) {
@@ -2435,7 +2610,7 @@ document.addEventListener("click", async e => {
   const act = el.dataset.act || (el.dataset.tab ? "tab" : null);
   if (act === "closesheet") { if (e.target === el) closeSheet(); return; }
   switch (act) {
-    case "tab": tab = el.dataset.tab; try { sessionStorage.setItem("stempeluhr.tab", tab); } catch (x) {} render(); window.scrollTo(0, 0); break;
+    case "tab": tab = el.dataset.tab; try { sessionStorage.setItem("stempeluhr.tab", tab); } catch (x) {} render(); window.scrollTo(0, 0); if (tab === "baust") tmSoon(300); break;
     case "stamp": stamp(el.dataset.k); break;
     case "undo": if (lastUndo) { setRec(lastUndo.ds, lastUndo.prev); lastUndo = null; $("toast-root").innerHTML = ""; toast("Rückgängig gemacht."); render(); } break;
     case "edit": openEditor(el.dataset.ds); break;
@@ -2457,9 +2632,18 @@ document.addEventListener("click", async e => {
     case "kdnote": openKdNote(+el.dataset.i); break;
     case "ksopen": openKstamm(); break;
     case "ausz": openAusz(); break;
-    case "fotoadd": fotoTarget = el.dataset.ds; $("foto-cam").click(); break;
-    case "fotogal": fotoTarget = el.dataset.ds; $("foto-file").click(); break;
+    case "fotoadd": fotoTarget = el.dataset.ds; fotoTargetK = el.dataset.k || fotoAutoK(el.dataset.ds); $("foto-cam").click(); break;
+    case "fotogal": fotoTarget = el.dataset.ds; fotoTargetK = el.dataset.k || fotoAutoK(el.dataset.ds); $("foto-file").click(); break;
     case "fotoview": openFoto(el.dataset.id); break;
+    case "tmsync": tmSync(true); break;
+    case "tmsave": { const v = ($("tm-code").value || "").trim(); if (v.length < 10) { toast("Der Firmencode braucht mindestens 10 Zeichen, am besten mit Zahlen."); break; }
+      S.settings.firmencode = v; tmSetState({ seit: 0, code: "", err: "", last: 0 });
+      // alles Eigene einmal an die (neue) Firma senden
+      const b = { ...bsAll() }; for (const k in b) b[k] = { ...b[k], items: (b[k].items || []).map(i => ({ ...i, p: undefined })) }; S.settings.baust = b;
+      const all = skLoad(); for (const id in all) delete all[id].p; skStore(all);
+      fotoTx("readonly", st => st.getAll()).then(l => { const ids = (l || []).filter(f => f.k && !f.need).map(f => f.id); tmSetState({ fotos: [...new Set([...(tmState().fotos || []), ...ids])] }); }).catch(() => {});
+      saveSettings(); toast("Verbunden. Wird jetzt abgeglichen …"); render(); setTimeout(() => tmSync(true), 300); break; }
+    case "tmoff": if (!confirm("Nicht mehr mit der Firma teilen? Deine Einträge bleiben auf dem Handy.")) break; S.settings.firmencode = ""; tmSetState({ seit: 0, code: "", err: "", last: 0 }); saveSettings(); render(); break;
     case "skopen": openSkizze(el.dataset.k, bsLabelByKey(el.dataset.k), el.dataset.id); break;
     case "sktool": case "skcol": case "skundo": case "skclose": case "skdel": case "skshare": await skAct(act, el); break;
     case "bsdone": case "bsdel": case "bsedit": case "bsmatdone": case "bsmatedit": case "bsrm": bsAct(act, el); break;
@@ -2744,7 +2928,7 @@ setSync("pending");
 // In der Cloud-Version erst nach dem Abgleich abschließen, damit kein älterer Stand neuere Daten überschreibt
 let closedOnce = false;
 assignNumbers();
-if (window.AndroidBridge || window.STEMPELUHR_OFFLINE || !(window.claude && window.claude.use)) { closedOnce = true; mergeDefaultKunden(); repairKunden(); assignNumbers(); closeMonths(); }
+if (window.AndroidBridge || window.STEMPELUHR_OFFLINE || !(window.claude && window.claude.use)) { closedOnce = true; mergeDefaultKunden(); repairKunden(); assignNumbers(); migrateBaust(); closeMonths(); tmSoon(1500); }
 render();
 connect();
 })();
