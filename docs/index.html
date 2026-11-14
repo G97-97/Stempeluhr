@@ -331,6 +331,7 @@ button { cursor: pointer; }
 .bs-done summary { font-size: 13px; color: var(--muted); cursor: pointer; padding: 6px 0; }
 .bs-foot { display: flex; justify-content: flex-end; margin-top: 8px; }
 .pw-wrap { position: relative; }
+.eye-btn { border: 0; background: none; font-size: 20px; width: 44px; height: 40px; padding: 0; vertical-align: middle; margin: -10px 0; }
 .pw-wrap input { width: 100%; padding-right: 52px; }
 .pw-eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 44px; height: 40px; border: 0; background: none; font-size: 20px; padding: 0; }
 .bs-by { display: inline-block; margin-left: 6px; font-size: 11.5px; font-weight: 600; color: var(--blue); background: var(--blue-soft); border-radius: 6px; padding: 0 5px; vertical-align: 1px; }
@@ -786,6 +787,10 @@ function earn(t) {
   const min = Math.max(0, { worked: t.worked, ist: t.ist, ueber: uo && uo.min, krank: t.krankMin }[basis]);
   return { basis, min, rate, sum: Math.round(min / 60 * rate * 100) / 100, seit: uo && uo.seit, uebertrag: uo && uo.uebertrag };
 }
+// Geldbeträge in der App verdeckt, bis man auf das Auge tippt (gilt bis die App geschlossen wird)
+let moneyShow = false;
+const mny = v => moneyShow ? v : "€ ••••";
+const moneyEye = () => `<button type="button" class="eye-btn" data-act="moneyeye" aria-pressed="${moneyShow}" aria-label="${moneyShow ? "Beträge verbergen" : "Beträge anzeigen"}">${moneyShow ? "🙈" : "👁"}</button>`;
 const earnLine = e => `${EARN_BASIS[e.basis]} ${dec(e.min)} h × ${eur(e.rate)} = ${eur(e.sum)}`;
 const kpDefault = () => Math.max(1, Math.min(120, Math.round(Number(S.settings.kpMin) || 10)));
 const kpSum = r => (r.kp || []).reduce((a, k) => a + (Number(k.min) || 0), 0);
@@ -1146,7 +1151,7 @@ function viewHeute() {
   ${(() => { const mk = S.settings.closedNotice, m = mk && S.months[mk]; if (!m || !m.closed) return ""; const c = m.closed;
     return `<section class="card closed-card"><h2>${monthName(mk, S.settings.region)} abgeschlossen</h2>
       <p class="hint" style="margin:0 0 10px">Die Ergebnisse sind gespeichert. Der neue Monat beginnt am 1. wieder bei null.</p>
-      <dl class="kv"><dt>Arbeitszeit</dt><dd>${hm(c.worked)} h</dd><dt>Saldo Monat</dt><dd class="${c.saldo >= 0 ? "pos" : "neg"}">${hmSigned(c.saldo)}</dd>${c.verdienst ? `<dt>Verdienst (${bn()})</dt><dd>${eur(c.verdienst.sum)}</dd>` : ""}</dl>
+      <dl class="kv"><dt>Arbeitszeit</dt><dd>${hm(c.worked)} h</dd><dt>Saldo Monat</dt><dd class="${c.saldo >= 0 ? "pos" : "neg"}">${hmSigned(c.saldo)}</dd>${c.verdienst ? `<dt>Verdienst (${bn()}) ${moneyEye()}</dt><dd>${mny(eur(c.verdienst.sum))}</dd>` : ""}</dl>
       <div class="btn-row" style="margin-top:12px"><button class="btn primary grow" data-act="closedcsv">${ICON.dl} CSV sichern</button><button class="btn grow" data-act="closedok">OK</button></div></section>`; })()}
   ${on("kunden") || kd.length ? kundenCard : ""}
   ${fotoCard(ds)}
@@ -1240,9 +1245,9 @@ function viewMonat() {
   ${(() => { const cs = customerStats(mk); return cs.length ? `<section class="card"><h2>Kunden im ${MONTHS[+mk.slice(5) - 1]}</h2><dl class="kv">${cs.map(e => `<dt>${esc(e.label)} <small style="color:var(--muted)">· ${e.n} ${e.n === 1 ? "Einsatz" : "Einsätze"}</small></dt><dd>${hm(e.min)} h</dd>`).join("")}</dl></section>` : ""; })()}
   <section class="days" aria-label="Tage">${rows}</section>
   ${(() => { if (!on("verdienst")) return ""; const e = earn(t); return `<section class="card earn">
-    <h2>Verdienst im ${MONTHS[+mk.slice(5) - 1]}</h2>
+    <div class="row"><h2 style="margin:0">Verdienst im ${MONTHS[+mk.slice(5) - 1]}</h2>${moneyEye()}</div>
     <div class="grid2">
-      <div class="field"><label for="m-rate">Betrag pro Stunde (€)</label><input id="m-rate" inputmode="decimal" autocomplete="off" placeholder="z. B. 18,50" value="${esc(String(rateStr(e.basis)).replace(".", ","))}"></div>
+      <div class="field"><label for="m-rate">Betrag pro Stunde (€)</label><input id="m-rate" type="${moneyShow ? "text" : "password"}" inputmode="decimal" autocomplete="off" placeholder="z. B. 18,50" value="${esc(String(rateStr(e.basis)).replace(".", ","))}"></div>
       <div class="field"><label for="m-basis">Welche Stunden</label><select id="m-basis">${Object.entries(EARN_BASIS).map(([k, l]) => `<option value="${k}" ${e.basis === k ? "selected" : ""}>${l}</option>`).join("")}</select></div>
     </div>
     <div class="field"><label for="m-bn">Betrag ist</label><select id="m-bn"><option value="netto" ${bn() === "netto" ? "selected" : ""}>Netto (was ausbezahlt wird)</option><option value="brutto" ${bn() === "brutto" ? "selected" : ""}>Brutto (vor Abzügen)</option></select></div>
@@ -1250,7 +1255,7 @@ function viewMonat() {
   </section>`; })()}`;
 }
 function earnOut(e) {
-  return e.rate ? `<span>${dec(e.min)} h × ${eur(e.rate)}</span><b>${eur(e.sum)}</b><small>${e.seit ? `Überstunden seit der letzten Auszahlung, gezählt ab ${fmtShort(e.seit)} ${e.seit.slice(0, 4)}${e.uebertrag ? `, davon ${hmSigned(e.uebertrag)} h Übertrag aus dem Vormonat` : ""}` : EARN_HINT[e.basis]}. Brutto, vor Steuern und Abgaben. Zählt Tage bis heute.</small>`
+  return e.rate ? `<span>${dec(e.min)} h × ${mny(eur(e.rate))}</span><b>${mny(eur(e.sum))}</b><small>${e.seit ? `Überstunden seit der letzten Auszahlung, gezählt ab ${fmtShort(e.seit)} ${e.seit.slice(0, 4)}${e.uebertrag ? `, davon ${hmSigned(e.uebertrag)} h Übertrag aus dem Vormonat` : ""}` : EARN_HINT[e.basis]}. ${bn() === "netto" ? "Netto, wie ausbezahlt" : "Brutto, vor Steuern und Abgaben"}. Zählt Tage bis heute.</small>`
     : `<small>Trag einen Betrag pro Stunde ein, dann wird der Gesamtbetrag für den Monat ausgerechnet.</small>`;
 }
 // Kundentabelle: Zeitfelder ohne Uhr-Symbol (Platz). Ein Tipp öffnet deshalb selbst die Zeitauswahl,
@@ -1336,7 +1341,7 @@ function viewJahr() {
       <dt>Krankenstand</dt><dd>${y.krank} Tage</dd>
       <dt>Arztbesuche</dt><dd>${hm(y.arzt)} h</dd>
       <dt>Kilometer</dt><dd>${y.km.toLocaleString("de-AT")} km</dd>
-      ${hasRate ? `<div class="sep"></div><dt>Verdienst (${bn()})</dt><dd>${eur(Math.round(y.verdienst * 100) / 100)}</dd>` : ""}
+      ${hasRate ? `<div class="sep"></div><dt>Verdienst (${bn()}) ${moneyEye()}</dt><dd>${mny(eur(Math.round(y.verdienst * 100) / 100))}</dd>` : ""}
     </dl>
     <button class="btn primary" style="width:100%;margin-top:14px" data-act="ycsv">${ICON.dl} CSV für ${viewYear}</button>
   </section>`;
@@ -2639,6 +2644,7 @@ document.addEventListener("click", async e => {
     case "fotogal": fotoTarget = el.dataset.ds; fotoTargetK = el.dataset.k || fotoAutoK(el.dataset.ds); $("foto-file").click(); break;
     case "fotoview": openFoto(el.dataset.id); break;
     case "tmsync": tmSync(true); break;
+    case "moneyeye": { moneyShow = !moneyShow; const y = window.scrollY; render(); window.scrollTo(0, y); break; }
     case "tmeye": { const i = $("tm-code"), show = i.type === "password"; i.type = show ? "text" : "password"; el.setAttribute("aria-pressed", show); el.setAttribute("aria-label", show ? "Code verbergen" : "Code anzeigen"); el.textContent = show ? "🙈" : "👁"; break; }
     case "tmsave": { const v = ($("tm-code").value || "").trim(); if (v.length < 10) { toast("Der Firmencode braucht mindestens 10 Zeichen, am besten mit Zahlen."); break; }
       S.settings.firmencode = v; tmSetState({ seit: 0, code: "", err: "", last: 0 });
