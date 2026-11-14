@@ -229,6 +229,9 @@ button { cursor: pointer; }
 .bs-done { margin-top: 10px; }
 .bs-done summary { font-size: 13px; color: var(--muted); cursor: pointer; padding: 6px 0; }
 .bs-foot { display: flex; justify-content: flex-end; margin-top: 8px; }
+.pw-wrap { position: relative; }
+.pw-wrap input { width: 100%; padding-right: 52px; }
+.pw-eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 44px; height: 40px; border: 0; background: none; font-size: 20px; padding: 0; }
 .bs-by { display: inline-block; margin-left: 6px; font-size: 11.5px; font-weight: 600; color: var(--blue); background: var(--blue-soft); border-radius: 6px; padding: 0 5px; vertical-align: 1px; }
 .sk-thumbs { display: flex; gap: 8px; overflow-x: auto; padding: 8px 0 4px; }
 .sk-th { flex: none; width: 92px; height: 138px; border-radius: 10px; border: 1px solid var(--line); padding: 0; background: #fff; overflow: hidden; }
@@ -1382,7 +1385,7 @@ function viewProfil() {
   <section class="card">
     <h2>Mit Kollegen teilen</h2>
     <p class="hint" style="margin:0 0 10px">Alle in der Firma tragen denselben <b>Firmencode</b> ein. Dann seht ihr gegenseitig im Reiter Baustellen die offenen Arbeiten, das Material, die Zeichnungen und die Fotos. <b>Stunden und Verdienst bleiben nur auf deinem Handy.</b> Der Code ist wie ein Passwort: nur an Kollegen weitergeben, mindestens 10 Zeichen mit Zahlen.</p>
-    <div class="field"><label for="tm-code">Firmencode</label><input id="tm-code" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(S.settings.firmencode || "")}" placeholder="z. B. Mayr-Tischlerei-48-Haus7"></div>
+    <div class="field"><label for="tm-code">Firmencode</label><div class="pw-wrap"><input id="tm-code" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(S.settings.firmencode || "")}" placeholder="z. B. Mayr-Tischlerei-48-Haus7"><button type="button" class="pw-eye" data-act="tmeye" aria-label="Code anzeigen" aria-pressed="false">👁</button></div></div>
     <p class="hint" style="margin:6px 0 10px">Andere sehen deine Einträge mit deinem Namen: <b>${esc(myName())}</b>${S.settings.name ? "" : " (oben bei Name eintragen)"}.</p>
     ${tmOn() ? tmStatusLine() : ""}
     <div class="btn-row"><button class="btn primary grow" data-act="tmsave">${tmOn() ? "Code ändern" : "Verbinden"}</button>${tmOn() ? `<button class="btn grow" data-act="tmoff">Nicht mehr teilen</button>` : ""}</div>
@@ -2534,6 +2537,7 @@ document.addEventListener("click", async e => {
     case "fotogal": fotoTarget = el.dataset.ds; fotoTargetK = el.dataset.k || fotoAutoK(el.dataset.ds); $("foto-file").click(); break;
     case "fotoview": openFoto(el.dataset.id); break;
     case "tmsync": tmSync(true); break;
+    case "tmeye": { const i = $("tm-code"), show = i.type === "password"; i.type = show ? "text" : "password"; el.setAttribute("aria-pressed", show); el.setAttribute("aria-label", show ? "Code verbergen" : "Code anzeigen"); el.textContent = show ? "🙈" : "👁"; break; }
     case "tmsave": { const v = ($("tm-code").value || "").trim(); if (v.length < 10) { toast("Der Firmencode braucht mindestens 10 Zeichen, am besten mit Zahlen."); break; }
       S.settings.firmencode = v; tmSetState({ seit: 0, code: "", err: "", last: 0 });
       // alles Eigene einmal an die (neue) Firma senden
