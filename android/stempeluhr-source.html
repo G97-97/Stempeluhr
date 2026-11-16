@@ -1645,6 +1645,7 @@ function viewBaust() {
     ${on("fotos") && !window.AndroidBridge ? `<div class="bs-lbl">Fotos</div>${fotoStripK(c.key)}` : ""}
     <div class="bs-lbl">Zeichnungen</div>
     <div class="sk-thumbs">${c.sk.map(x => `<button type="button" class="sk-th" data-act="skopen" data-k="${esc(c.key)}" data-id="${esc(x.id)}" aria-label="Zeichnung öffnen"><img src="${skThumb(x)}" alt=""></button>`).join("")}<button type="button" class="sk-th sk-new" data-act="skopen" data-k="${esc(c.key)}" aria-label="Neue Zeichnung"><span>+</span>Zeichnung</button></div>
+    <div class="bs-foot" style="justify-content:stretch"><button class="btn grow" data-act="bspdf" data-k="${esc(c.key)}">📄 Als PDF teilen</button></div>
     ${c.done.length ? `<details class="bs-done"><summary>Erledigt (${c.done.length})</summary>${c.done.map(it => row(c, it)).join("")}</details>` : ""}
     ${!c.open.length && !c.mat.length && !c.sk.length && !c.heute ? `<div class="bs-foot"><button class="btn ghost" data-act="bsrm" data-k="${esc(c.key)}" style="color:var(--danger)">Baustelle entfernen</button></div>` : ""}
   </section>`).join("") : `<section class="card"><p class="hint" style="margin:0">Noch keine Baustellen. Oben eine Kundennummer oder einen Namen eintragen.</p></section>`}`;
@@ -1800,6 +1801,88 @@ setInterval(() => { if (tmOn() && document.visibilityState === "visible") tmSync
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") tmSoon(800); });
 window.addEventListener("online", () => tmSoon(800));
 
+/* ---------- Baustelle als PDF (zum Weiterleiten, z. B. per WhatsApp an den Chef) ----------
+   Seiten werden als A4-Bild gezeichnet und als JPEG in eine PDF-Datei gepackt (ohne Zusatzbibliothek). */
+function pdfFromJpegs(jpegs) {
+  const enc = new TextEncoder(), parts = [], offs = []; let len = 0;
+  const add = x => { const b = typeof x === "string" ? enc.encode(x) : x; parts.push(b); len += b.length; };
+  const obj = (n, body) => { offs[n] = len; add(`${n} 0 obj\n`); for (const x of [].concat(body)) add(x); add("\nendobj\n"); };
+  const W = 595.28, H = 841.89, n = jpegs.length, kids = jpegs.map((_, i) => `${3 + i * 3} 0 R`).join(" ");
+  add("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
+  obj(1, "<< /Type /Catalog /Pages 2 0 R >>");
+  obj(2, `<< /Type /Pages /Kids [${kids}] /Count ${n} >>`);
+  jpegs.forEach((j, i) => {
+    const pg = 3 + i * 3, cs = pg + 1, im = pg + 2, content = `q ${W} 0 0 ${H} 0 0 cm /Im0 Do Q`;
+    obj(pg, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /XObject << /Im0 ${im} 0 R >> >> /Contents ${cs} 0 R >>`);
+    obj(cs, [`<< /Length ${content.length} >>\nstream\n`, content, "\nendstream"]);
+    obj(im, [`<< /Type /XObject /Subtype /Image /Width ${j.w} /Height ${j.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${j.data.length} >>\nstream\n`, j.data, "\nendstream"]);
+  });
+  const total = 3 + n * 3, xref = len;
+  add(`xref\n0 ${total}\n0000000000 65535 f \n`);
+  for (let i = 1; i < total; i++) add(String(offs[i]).padStart(10, "0") + " 00000 n \n");
+  add(`trailer\n<< /Size ${total} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`);
+  return new Blob(parts, { type: "application/pdf" });
+}
+async function baustPdf(key, label) {
+  const W = 1240, H = 1754, L = 80, R = W - 80, F = (w, px) => `${w} ${px}px Arial, "Helvetica Neue", sans-serif`, GREEN = "#0E6B57", GRAY = "#555";
+  const open = bsLive(key, "todo").filter(i => !i.done), mat = bsLive(key, "mat").filter(i => !i.done);
+  const done = [...bsLive(key, "todo"), ...bsLive(key, "mat")].filter(i => i.done).sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 30);
+  const sks = skFor(key), fotos = on("fotos") ? await fotoListK(key).catch(() => []) : [];
+  const pages = []; let cv, g, y;
+  const newPage = () => {
+    cv = document.createElement("canvas"); cv.width = W; cv.height = H; g = cv.getContext("2d"); pages.push(cv);
+    g.fillStyle = "#fff"; g.fillRect(0, 0, W, H); g.textBaseline = "alphabetic"; g.textAlign = "left";
+    g.fillStyle = "#111"; g.font = F(700, 40); g.fillText(fitW(`Baustelle ${label}`, R - L), L, 110);
+    g.font = F(400, 21); g.fillStyle = GRAY;
+    g.fillText([`Stand ${fmtDate(Date.now())}`, S.settings.name, S.settings.firma].filter(Boolean).join("  ·  ") + (pages.length > 1 ? `  ·  Seite ${pages.length}` : ""), L, 148);
+    g.fillStyle = GREEN; g.fillRect(L, 166, R - L, 4); y = 220;
+  };
+  const fitW = (t, maxW) => { if (!g || g.measureText(t).width <= maxW) return t; let x = t; while (x.length > 3 && g.measureText(x + "…").width > maxW) x = x.slice(0, -1); return x + "…"; };
+  const wrap = (t, maxW) => { const out = []; let line = ""; for (const w of String(t).split(/\s+/)) { const tryL = line ? line + " " + w : w; if (g.measureText(tryL).width > maxW && line) { out.push(line); line = w; } else line = tryL; } if (line) out.push(line); return out.length ? out : [""]; };
+  const need = h => { if (y + h > H - 70) newPage(); };
+  const heading = (t, n) => { need(90); g.font = F(700, 25); g.fillStyle = GREEN; g.fillText(`${t.toUpperCase()}${n != null ? `  (${n})` : ""}`, L, y); y += 14; g.fillRect(L, y, R - L, 2); y += 38; };
+  const item = (it, mark) => {
+    g.font = F(400, 27); const lines = wrap(it.t, R - L - 70 - 10), h = lines.length * 36 + 16; need(h);
+    g.strokeStyle = "#333"; g.lineWidth = 3;
+    if (mark === "box") g.strokeRect(L + 4, y - 24, 28, 28);
+    else { g.strokeStyle = GREEN; g.beginPath(); g.moveTo(L + 6, y - 10); g.lineTo(L + 16, y); g.lineTo(L + 34, y - 24); g.stroke(); }
+    g.fillStyle = mark === "done" ? GRAY : "#111";
+    lines.forEach((ln, i) => g.fillText(ln, L + 60, y + i * 36));
+    if (it.by && it.by !== myName() || mark === "done") { g.font = F(400, 18); g.fillStyle = GRAY; g.textAlign = "right"; g.fillText([it.by && it.by !== myName() ? it.by : "", mark === "done" && it.at ? "erledigt " + fmtShort(new Date(it.at).toISOString().slice(0, 10)) : ""].filter(Boolean).join(" · "), R, y + (lines.length - 1) * 36); g.textAlign = "left"; }
+    y += lines.length * 36 - 20; g.fillStyle = "#DDD"; g.fillRect(L, y + 14, R - L, 1.5); y += 50;
+  };
+  const images = async (list, title, draw) => {
+    if (!list.length) return; heading(title, list.length);
+    const colW = (R - L - 40) / 2;
+    for (let i = 0; i < list.length; i += 2) {
+      const pair = list.slice(i, i + 2), dims = await Promise.all(pair.map(draw.size)), rowH = Math.max(...dims.map(d => colW * d.h / d.w)) + 20;
+      need(Math.min(rowH, H - 300)); const h0 = Math.min(rowH - 20, H - y - 90);
+      for (let j = 0; j < pair.length; j++) { const d = dims[j], k = Math.min(colW / d.w, h0 / d.h); await draw.paint(pair[j], L + j * (colW + 40), y, d.w * k, d.h * k); g.strokeStyle = "#CCC"; g.lineWidth = 1.5; g.strokeRect(L + j * (colW + 40), y, d.w * k, d.h * k); }
+      y += h0 + 30;
+    }
+  };
+  newPage();
+  heading("Noch zu erledigen", open.length);
+  if (!open.length) { g.font = F(400, 24); g.fillStyle = GRAY; g.fillText("Nichts offen.", L, y); y += 50; }
+  for (const it of open) item(it, "box");
+  y += 10; heading("Material fürs nächste Mal", mat.length);
+  if (!mat.length) { g.font = F(400, 24); g.fillStyle = GRAY; g.fillText("Kein Material eingetragen.", L, y); y += 50; }
+  for (const it of mat) item(it, "box");
+  if (done.length) { y += 10; heading("Erledigt", done.length); for (const it of done) item(it, "done"); }
+  await images(sks, "Zeichnungen", { size: async () => ({ w: SKW, h: SKH }), paint: async (x, px, py, w, h) => { const c2 = document.createElement("canvas"); c2.width = Math.round(w); c2.height = Math.round(h); skPaint(c2.getContext("2d"), x.items || [], w / SKW); g.drawImage(c2, px, py, w, h); } });
+  const bmp = new Map();
+  const getBmp = async f => { if (!bmp.has(f.id)) bmp.set(f.id, await fotoDecode(fotoBlob(f)).catch(() => null)); return bmp.get(f.id); };
+  await images(fotos, "Fotos", { size: async f => { const b = await getBmp(f); return b ? { w: b.naturalWidth || b.width, h: b.naturalHeight || b.height } : { w: 4, h: 3 }; },
+    paint: async (f, px, py, w, h) => { const b = await getBmp(f); if (b) g.drawImage(b, px, py, w, h); else { g.fillStyle = "#EEE"; g.fillRect(px, py, w, h); } } });
+  for (const b of bmp.values()) if (b && b.close) b.close();
+  const jpegs = [];
+  for (const c of pages) {
+    const bl = await new Promise(r => c.toBlob(r, "image/jpeg", .85));
+    if (!bl) throw new Error("Seite konnte nicht gezeichnet werden");
+    jpegs.push({ w: c.width, h: c.height, data: new Uint8Array(await bl.arrayBuffer()) }); c.width = c.height = 0;
+  }
+  return pdfFromJpegs(jpegs);
+}
 /* ---------- Zeichnungen pro Baustelle (Vektor, eigener localStorage-Schlüssel; Teilen als PNG) ---------- */
 const SK_KEY = "stempeluhr.skizzen", SKW = 1000, SKH = 1500, SK_GRID = 40;
 function skLoad() { try { return JSON.parse(localStorage.getItem(SK_KEY) || "{}") || {}; } catch (e) { return {}; } }
@@ -2276,7 +2359,7 @@ async function shareOrSave(filename, blob, title) {
   } catch (e) { if (e && e.name === "AbortError") return; }
   if (window.STEMPELUHR_OFFLINE) {
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = filename; document.body.appendChild(a); a.click();
-    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000); toast("Bild wird in Downloads gespeichert."); return;
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000); toast(filename.endsWith(".pdf") ? "PDF wird in Downloads gespeichert." : "Bild wird in Downloads gespeichert."); return;
   }
   await offerFile(filename, new Uint8Array(await blob.arrayBuffer()));
 }
@@ -2463,7 +2546,7 @@ function buildReport(mk) {
 }
 async function offerFile(filename, data) {
   const bin = data instanceof Uint8Array;
-  const mime = filename.endsWith(".png") ? "image/png" : filename.endsWith(".xlsx") ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : filename.endsWith(".csv") ? "text/csv" : filename.endsWith(".html") ? "text/html" : "application/json";
+  const mime = filename.endsWith(".pdf") ? "application/pdf" : filename.endsWith(".png") ? "image/png" : filename.endsWith(".xlsx") ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : filename.endsWith(".csv") ? "text/csv" : filename.endsWith(".html") ? "text/html" : "application/json";
   if (window.AndroidBridge) { if (bin) { toast("Excel-Datei geht in dieser App-Version nicht. Bitte die Web-App verwenden."); return; } AndroidBridge.saveFile(filename, mime, data); return; }
   if (window.STEMPELUHR_OFFLINE) {
     const a = document.createElement("a");
@@ -2542,6 +2625,10 @@ document.addEventListener("click", async e => {
     case "fotogal": fotoTarget = el.dataset.ds; fotoTargetK = el.dataset.k || fotoAutoK(el.dataset.ds); $("foto-file").click(); break;
     case "fotoview": openFoto(el.dataset.id); break;
     case "tmsync": tmSync(true); break;
+    case "bspdf": { const key = el.dataset.k, label = bsLabelByKey(key); el.disabled = true; el.textContent = "PDF wird erstellt …";
+      try { const pdf = await baustPdf(key, label); await shareOrSave(`Baustelle_${label.replace(/[^\wäöüÄÖÜß-]+/g, "_").replace(/_+/g, "_").slice(0, 50)}_${todayDs()}.pdf`, pdf, `Baustelle ${label}`); }
+      catch (x) { toast(`PDF konnte nicht erstellt werden (${(x && x.message) || "Fehler"}).`); }
+      el.disabled = false; el.textContent = "📄 Als PDF teilen"; break; }
     case "moneyeye": { moneyShow = !moneyShow; const y = window.scrollY; render(); window.scrollTo(0, y); break; }
     case "tmeye": { const i = $("tm-code"), show = i.type === "password"; i.type = show ? "text" : "password"; el.setAttribute("aria-pressed", show); el.setAttribute("aria-label", show ? "Code verbergen" : "Code anzeigen"); el.textContent = show ? "🙈" : "👁"; break; }
     case "tmsave": { const v = ($("tm-code").value || "").trim(); if (v.length < 10) { toast("Der Firmencode braucht mindestens 10 Zeichen, am besten mit Zahlen."); break; }
