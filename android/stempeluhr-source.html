@@ -702,6 +702,7 @@ const isFlex = () => S.settings.modell === "woche";
 const nurStd = () => S.settings.erfassung === "stunden";
 /* Funktionen im Profil ein-/ausblendbar (Standard: alles an). Ausblenden löscht keine Daten. */
 const FUNKTIONEN = { baust: "Baustellen (offene Arbeiten)", fotos: "Fotos pro Tag", mittag: "Mittagspause stempeln", kaffee: "Kaffeepause", betrieb: "Betrieb einstempeln", kunden: "Kunden", km: "Kilometer", projekt: "Projekt / Kostenstelle", verdienst: "Verdienst im Monat" };
+const APP_VER = "__APP_VER__";
 const on = k => (S.settings.zeigen || {})[k] !== false;
 /* "8", "7,5", "7.25", "7:30" → Minuten (null wenn ungültig) */
 function parseStd(v) {
@@ -1407,6 +1408,11 @@ function viewProfil() {
     <h2>Alle Daten löschen</h2>
     <p class="hint" style="margin:0 0 12px">Entfernt alle Stempelzeiten, Abwesenheiten und Einstellungen.</p>
     <button class="btn danger" data-act="wipe">Alle Daten löschen …</button>
+  </section>
+  <section class="card">
+    <h2>App-Version</h2>
+    <p class="hint" style="margin:0 0 12px">Du hast <b>Version ${esc(APP_VER)}</b>. Fehlt etwas, das andere schon haben (z. B. der Reiter Baustellen), lädt dieser Knopf die neueste Version. Deine Daten bleiben erhalten.</p>
+    <button class="btn" style="width:100%" data-act="appupdate">App aktualisieren</button>
   </section>`;
 }
 
@@ -2625,6 +2631,9 @@ document.addEventListener("click", async e => {
     case "fotogal": fotoTarget = el.dataset.ds; fotoTargetK = el.dataset.k || fotoAutoK(el.dataset.ds); $("foto-file").click(); break;
     case "fotoview": openFoto(el.dataset.id); break;
     case "tmsync": tmSync(true); break;
+    case "appupdate": { el.disabled = true; el.textContent = "Wird aktualisiert …";
+      try { if (navigator.serviceWorker) for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); if (window.caches) for (const k of await caches.keys()) await caches.delete(k); } catch (x) {}
+      location.replace(location.pathname + "?v=" + Date.now()); break; }
     case "bspdf": { const key = el.dataset.k, label = bsLabelByKey(key); el.disabled = true; el.textContent = "PDF wird erstellt …";
       try { const pdf = await baustPdf(key, label); await shareOrSave(`Baustelle_${label.replace(/[^\wäöüÄÖÜß-]+/g, "_").replace(/_+/g, "_").slice(0, 50)}_${todayDs()}.pdf`, pdf, `Baustelle ${label}`); }
       catch (x) { toast(`PDF konnte nicht erstellt werden (${(x && x.message) || "Fehler"}).`); }

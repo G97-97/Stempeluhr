@@ -2,7 +2,7 @@
 """Erzeugt aus stempeluhr-source.html die Offline-Seite für die APK (app/assets) und die installierbare Web-App (web/)."""
 import hashlib, io, json, os, shutil, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from build import build_icon
+from build import build_icon, VERSION_NAME
 from PIL import Image
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -17,6 +17,7 @@ def page(extra_head=""):
             '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">' + title + extra_head +
             '\n<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}'
             'body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}\n' + FONT_CSS + '</style>')
+    rest = rest.replace("__APP_VER__", VERSION_NAME)
     return head + rest.replace('<div class="app">', '</head><body>\n<div class="app">', 1) + "\n</body></html>"
 
 # APK-Assets
