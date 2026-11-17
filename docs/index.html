@@ -804,7 +804,7 @@ const isFlex = () => S.settings.modell === "woche";
 const nurStd = () => S.settings.erfassung === "stunden";
 /* Funktionen im Profil ein-/ausblendbar (Standard: alles an). Ausblenden löscht keine Daten. */
 const FUNKTIONEN = { baust: "Baustellen (offene Arbeiten)", fotos: "Fotos pro Tag", mittag: "Mittagspause stempeln", kaffee: "Kaffeepause", betrieb: "Betrieb einstempeln", kunden: "Kunden", km: "Kilometer", projekt: "Projekt / Kostenstelle", verdienst: "Verdienst im Monat" };
-const APP_VER = "4.6";
+const APP_VER = "4.7";
 const on = k => (S.settings.zeigen || {})[k] !== false;
 /* "8", "7,5", "7.25", "7:30" → Minuten (null wenn ungültig) */
 function parseStd(v) {
@@ -1785,7 +1785,8 @@ function bsAct(act, el) {
    Stundendaten bleiben auf dem Handy. Lesen und schreiben geht nur mit dem Firmencode (Server speichert nur dessen Hash). */
 const SB_URL = "https://ajozoqgytbuflgiylfjk.supabase.co", SB_KEY = "sb_publishable__QfJMR51r9hiKPY0fL_3_Q_1hGKn2Ar";
 const TM_KEY = "stempeluhr.team";
-const tmCode = () => String(S.settings.firmencode || "").trim();
+// Groß-/Kleinschreibung und Leerzeichen zählen nicht: „Mayr Tischlerei 48“ = „mayrtischlerei48“
+const tmCode = () => String(S.settings.firmencode || "").toLowerCase().replace(/\s+/g, "");
 const tmOn = () => tmCode().length >= 10;
 function tmState() { try { return JSON.parse(localStorage.getItem(TM_KEY) || "{}") || {}; } catch (e) { return {}; } }
 function tmSetState(ch) { try { localStorage.setItem(TM_KEY, JSON.stringify({ ...tmState(), ...ch })); } catch (e) {} }
@@ -1802,6 +1803,11 @@ function fotoAutoK(ds) {
   if (ds && ds !== todayDs()) return null;
   const k = ((getRec(todayDs()) || {}).kunden || []).filter(x => x.from && !x.to && !isBetr(x) && (x.name || x.nr)).pop();
   if (!k) return null; const l = kLabel({ nr: k.nr, name: kCurName(k) }); return bsFind(l) || matKey(l);
+}
+async function tmResetPush() {
+  const b = { ...bsAll() }; for (const k in b) b[k] = { ...b[k], items: (b[k].items || []).map(i => ({ ...i, p: undefined })) }; S.settings.baust = b;
+  const all = skLoad(); for (const id in all) delete all[id].p; skStore(all);
+  try { const l = await fotoTx("readonly", st => st.getAll()); const ids = (l || []).filter(f => f.k && !f.need).map(f => f.id); tmSetState({ fotos: [...new Set([...(tmState().fotos || []), ...ids])] }); } catch (e) {}
 }
 function tmRows() {
   const rows = [];
@@ -1857,6 +1863,8 @@ async function tmSync(manual) {
   if (navigator.onLine === false) { tmSetState({ err: "Kein Internet. Wird abgeglichen, sobald wieder Netz da ist." }); if (manual) toast("Kein Internet. Der Abgleich folgt automatisch."); return; }
   tmBusy = true; let changed = false, pushed = 0, pulled = 0;
   const code = tmCode();
+  // Neuer oder anders geschriebener Code: alles Eigene noch einmal senden und alles neu holen
+  if (tmState().pushedCode !== code) { await tmResetPush(); tmSetState({ pushedCode: code, seit: 0, code: "" }); }
   try {
     // 1. Eigene Änderungen senden
     const rows = tmRows();
@@ -2743,11 +2751,7 @@ document.addEventListener("click", async e => {
     case "moneyeye": { moneyShow = !moneyShow; const y = window.scrollY; render(); window.scrollTo(0, y); break; }
     case "tmeye": { const i = $("tm-code"), show = i.type === "password"; i.type = show ? "text" : "password"; el.setAttribute("aria-pressed", show); el.setAttribute("aria-label", show ? "Code verbergen" : "Code anzeigen"); el.textContent = show ? "🙈" : "👁"; break; }
     case "tmsave": { const v = ($("tm-code").value || "").trim(); if (v.length < 10) { toast("Der Firmencode braucht mindestens 10 Zeichen, am besten mit Zahlen."); break; }
-      S.settings.firmencode = v; tmSetState({ seit: 0, code: "", err: "", last: 0 });
-      // alles Eigene einmal an die (neue) Firma senden
-      const b = { ...bsAll() }; for (const k in b) b[k] = { ...b[k], items: (b[k].items || []).map(i => ({ ...i, p: undefined })) }; S.settings.baust = b;
-      const all = skLoad(); for (const id in all) delete all[id].p; skStore(all);
-      fotoTx("readonly", st => st.getAll()).then(l => { const ids = (l || []).filter(f => f.k && !f.need).map(f => f.id); tmSetState({ fotos: [...new Set([...(tmState().fotos || []), ...ids])] }); }).catch(() => {});
+      S.settings.firmencode = v; tmSetState({ seit: 0, code: "", pushedCode: "", err: "", last: 0 });
       saveSettings(); toast("Verbunden. Wird jetzt abgeglichen …"); render(); setTimeout(() => tmSync(true), 300); break; }
     case "tmoff": if (!confirm("Nicht mehr mit der Firma teilen? Deine Einträge bleiben auf dem Handy.")) break; S.settings.firmencode = ""; tmSetState({ seit: 0, code: "", err: "", last: 0 }); saveSettings(); render(); break;
     case "skopen": openSkizze(el.dataset.k, bsLabelByKey(el.dataset.k), el.dataset.id); break;
