@@ -316,6 +316,49 @@ body.printing { overflow: hidden; }
 .toast span { flex: 1; min-width: 0; }
 
 .empty { text-align: center; padding: 20px 8px; color: var(--muted); font-size: 14px; }
+
+/* Urlaubskalender */
+.uc-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.uc-head h2 { margin: 0; }
+.uc-yr { display: flex; align-items: center; gap: 4px; font-family: var(--f-num); font-weight: 700; font-size: 16px; }
+.uc-yr button { background: none; border: 0; color: var(--ink); padding: 6px; border-radius: 8px; display: flex; }
+.uc-leg { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+.uc-leg i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 4px; }
+.uc-ms { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px 12px; }
+@media (min-width: 560px) { .uc-ms { grid-template-columns: repeat(3, minmax(0,1fr)); } }
+.uc-m b { display: block; font-size: 13px; margin-bottom: 4px; }
+.uc-m b small { font-weight: 600; color: var(--accent); margin-left: 4px; }
+.uc-g { display: grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap: 2px; }
+.uc-g span { font-size: 9.5px; color: var(--muted); text-align: center; }
+.uc-d { appearance: none; border: 0; padding: 0; aspect-ratio: 1; min-width: 0; border-radius: 5px; background: transparent; color: var(--ink); font: 600 11px/1 var(--f-num); font-variant-numeric: tabular-nums; cursor: pointer; }
+.uc-d.w { color: var(--muted); opacity: .55; }
+.uc-d.f { color: var(--break); background: var(--break-soft); opacity: 1; }
+.uc-d.lw { background: var(--break-soft); opacity: .8; }
+.uc-d.b { box-shadow: inset 0 0 0 2px var(--break); }
+.uc-d.a { background: var(--violet-soft); color: var(--violet); }
+.uc-d.u { background: var(--accent); color: var(--accent-ink); }
+.uc-d.uh { background: linear-gradient(135deg, var(--accent) 50%, var(--accent-soft) 50%); color: var(--ink); }
+.uc-d.t { box-shadow: inset 0 0 0 2px var(--accent); }
+.uc-d.s { background: var(--blue); color: #fff; }
+.uc-sel { margin: 10px 0 0; padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); font-size: 14px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.uc-blocks { margin-top: 14px; }
+.uc-cd { text-align: center; padding: 4px 0 2px; }
+.uc-cd .big { font: 700 54px/1 var(--f-num); color: var(--accent); font-variant-numeric: tabular-nums; }
+.uc-cd .lbl { font-size: 15px; font-weight: 600; margin-top: 4px; }
+.uc-cd .sub2 { font-size: 13px; color: var(--muted); margin-top: 4px; }
+.uc-bar { height: 12px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin: 12px 0 4px; }
+.uc-bar i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent-soft), var(--accent)); }
+.uc-barl { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--muted); }
+.uc-row { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 14px; align-items: center; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.uc-ring { position: relative; width: 104px; height: 104px; }
+.uc-ring svg { transform: rotate(-90deg); }
+.uc-ring div { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.uc-ring b { font: 700 24px/1 var(--f-num); }
+.uc-ring small { font-size: 11px; color: var(--muted); }
+.uc-za { font-size: 14px; line-height: 1.45; }
+.uc-za b { font-family: var(--f-num); }
+.uc-br .li b { font-size: 14.5px; }
+.uc-gain { font: 700 13px var(--f-num); color: var(--break); white-space: nowrap; }
 </style>
 
 <div class="app">
@@ -1286,6 +1329,119 @@ function dayGapFree(a, b) { let x = addDays(a, 1); while (x < b) { if (sollBase(
 const fmtShort = ds => { const d = parseDs(ds); return `${WD[d.getDay()]} ${d.getDate()}.${d.getMonth() + 1}.`; };
 const fmtDate = ts => { const d = new Date(ts); return `${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`; };
 
+
+/* ---------- Urlaubskalender ---------- */
+let ucYear = +todayDs().slice(0, 4), ucSel = null;
+const isVac = k => k === "urlaub" || k === "urlaub_halb";
+function ucBlocks(year) { return absenceGroups(String(year)).filter(g => isVac(g.kind)).reverse(); }
+const vacDays = g => g.days.filter(x => sollBase(x) > 0).length * (g.kind === "urlaub_halb" ? .5 : 1);
+const dn = n => String(n).replace(".", ",");
+
+/* Freie Tage: Wochenende, Feiertag oder schon Urlaub */
+const ucFree = ds => { if (sollBase(ds) === 0) return true; const r = getRec(ds); return !!(r && r.kind === "urlaub"); };
+function ucRun(ds, dir) { const out = []; let x = addDays(ds, dir); while (ucFree(x) && out.length < 40) { out.push(x); x = addDays(x, dir); } return out; }
+/* Brückentage: 1–2 Arbeitstage zwischen freien Tagen, wo ein Feiertag beteiligt ist */
+function ucBridges(year) {
+  const res = [], seen = new Set();
+  for (let x = `${year}-01-01`; x.startsWith(String(year)); x = addDays(x, 1)) {
+    if (ucFree(x) || seen.has(x) || !ucFree(addDays(x, -1))) continue;
+    const gap = [x]; let n = addDays(x, 1);
+    while (!ucFree(n) && gap.length < 3) { gap.push(n); n = addDays(n, 1); }
+    if (gap.length > 2) continue;
+    gap.forEach(g => seen.add(g));
+    const left = ucRun(x, -1), right = ucRun(gap[gap.length - 1], 1), free = [...left, ...right];
+    if (!free.some(f => holidayName(f))) continue;
+    const total = free.length + gap.length;
+    if (total < 4) continue;
+    res.push({ days: gap, free, from: left.length ? left[left.length - 1] : x, to: right.length ? right[right.length - 1] : gap[gap.length - 1], total, hol: free.map(holidayName).filter(Boolean)[0] });
+  }
+  return res;
+}
+const workdaysBetween = (a, b) => { let n = 0, x = a; while (x < b) { if (sollBase(x) > 0) n++; x = addDays(x, 1); } return n; };
+function ucTop() {
+  const today = todayDs(), year = today.slice(0, 4), v = vacation(year);
+  const all = [...ucBlocks(+year), ...ucBlocks(+year + 1)].filter(g => g.kind === "urlaub");
+  const cur = all.find(g => g.from <= today && g.to >= today), next = all.find(g => g.from > today);
+  let cd;
+  if (cur) {
+    const left = ucRun(cur.to, 1), back = addDays(left.length ? left[left.length - 1] : cur.to, 1);
+    cd = `<div class="uc-cd"><div class="big">🌴</div><div class="lbl">Du bist im Urlaub!</div><div class="sub2">Wieder arbeiten am ${fmtShort(back)}</div></div>`;
+  } else if (next) {
+    const n = workdaysBetween(today, next.from) - (sollBase(today) > 0 && (getRec(today) || {}).out ? 1 : 0);
+    const before = ucRun(next.from, -1), after = ucRun(next.to, 1), first = before.length ? before[before.length - 1] : next.from, last = after.length ? after[after.length - 1] : next.to;
+    let freeN = 0; for (let x = first; x <= last; x = addDays(x, 1)) freeN++;
+    const prev = all.filter(g => g.to < today).pop(), start = prev ? addDays(prev.to, 1) : `${year}-01-01`;
+    const tot = Math.max(1, workdaysBetween(start, next.from)), pct = Math.max(3, Math.min(100, Math.round((tot - Math.max(0, n)) / tot * 100)));
+    cd = `<div class="uc-cd"><div class="big">${Math.max(0, n)}</div><div class="lbl">${n === 1 ? "Arbeitstag" : "Arbeitstage"} bis zum Urlaub</div><div class="sub2">${fmtShort(next.from)}${next.to !== next.from ? " – " + fmtShort(next.to) : ""} · ${freeN} Tage frei am Stück</div></div>
+      <div class="uc-bar"><i style="width:${pct}%"></i></div><div class="uc-barl"><span>${prev ? "seit letztem Urlaub" : "seit Jahresbeginn"}</span><span>${pct} % geschafft</span></div>`;
+  } else cd = `<div class="uc-cd"><div class="lbl">Noch kein Urlaub geplant</div><div class="sub2">Tipp: Unten im Kalender antippen oder einen Brückentag nutzen.</div></div>`;
+  const R = 44, C = 2 * Math.PI * R, tot = Math.max(v.total, .5), seg = (val, off, col) => `<circle cx="52" cy="52" r="${R}" fill="none" stroke="${col}" stroke-width="12" stroke-dasharray="${Math.max(0, val / tot * C)} ${C}" stroke-dashoffset="${-off / tot * C}"/>`;
+  const ring = `<div class="uc-ring" role="img" aria-label="${dn(v.rest)} von ${dn(v.total)} Urlaubstagen übrig"><svg width="104" height="104" viewBox="0 0 104 104"><circle cx="52" cy="52" r="${R}" fill="none" stroke="var(--surface-2)" stroke-width="12"/>${seg(Math.min(v.taken, tot), 0, "var(--accent)")}${seg(Math.min(v.planned, Math.max(0, tot - v.taken)), v.taken, "var(--accent-soft)")}</svg><div><b class="${v.rest >= 0 ? "" : "neg"}">${dn(v.rest)}</b><small>von ${dn(v.total)} übrig</small></div></div>`;
+  const wk = sollWoche(), wd = wk.filter(m => m > 0), avg = wd.length ? wd.reduce((a, b) => a + b, 0) / wd.length : 480, saldo = totalSaldo(), za = Math.floor(saldo / avg * 2) / 2;
+  const zaTxt = saldo > 0 ? `⏱️ Überstunden <b>${hm(saldo)} h</b><br>reichen für <b>${dn(za)} Tag${za === 1 ? "" : "e"}</b> Zeitausgleich <small class="hint" style="display:block">bei Ø ${hm(Math.round(avg))} h pro Arbeitstag</small>` : `⏱️ Zeitkonto <b>${hmSigned(saldo)} h</b><br><small class="hint">Noch keine Überstunden für Zeitausgleich.</small>`;
+  return `<section class="card"><h2>Nächster Urlaub</h2>${cd}
+    <div class="uc-row">${ring}<div class="uc-za"><div style="margin-bottom:6px">🏖️ Verbraucht <b>${dn(v.taken)}</b> · geplant <b>${dn(v.planned)}</b></div>${zaTxt}</div></div></section>`;
+}
+function ucBridgeCard() {
+  const today = todayDs(), list = ucBridges(ucYear).filter(b => b.days[0] > today);
+  if (!list.length) return "";
+  return `<section class="card uc-br"><h2>Brückentag-Tipps ${ucYear}</h2><p class="hint" style="margin:0 0 8px">Mit wenig Urlaub viele freie Tage am Stück.</p><div class="list">${list.map(b => `<div class="li"><div><b>${b.days.length} Tag${b.days.length === 1 ? "" : "e"} Urlaub → ${b.total} Tage frei</b><small>${b.days.map(fmtShort).join(", ")} · ${esc(b.hol || "")} · frei ${fmtShort(b.from)} – ${fmtShort(b.to)}</small></div><button class="btn" data-act="ucbridge" data-from="${b.days[0]}" data-to="${b.days[b.days.length - 1]}">Eintragen</button></div>`).join("")}</div></section>`;
+}
+function urlCal() {
+  const y = ucYear, today = todayDs(), v = vacation(String(y)), blocks = ucBlocks(y), br = ucBridges(y), brDays = new Set(br.flatMap(b => b.days)), lw = new Set(br.flatMap(b => b.free));
+  const legend = `<div class="uc-leg"><span><i style="background:var(--accent)"></i>Urlaub</span><span><i style="background:linear-gradient(135deg,var(--accent) 50%,var(--accent-soft) 50%)"></i>½ Tag</span><span><i style="background:var(--break-soft);border:1px solid var(--break)"></i>Feiertag</span><span><i style="box-shadow:inset 0 0 0 2px var(--break)"></i>Brückentag</span><span><i style="background:var(--violet-soft)"></i>Krank / andere</span></div>`;
+  let ms = "";
+  for (let m = 1; m <= 12; m++) {
+    const mk = `${y}-${String(m).padStart(2, "0")}`, first = parseDs(mk + "-01"), nd = new Date(y, m, 0).getDate();
+    let cells = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"].map(w => `<span>${w[0]}</span>`).join("") + "<i></i>".repeat((first.getDay() + 6) % 7), cnt = 0;
+    for (let d = 1; d <= nd; d++) {
+      const ds = `${mk}-${String(d).padStart(2, "0")}`, r = getRec(ds), k = r && r.kind, hol = holidayName(ds), work = sollBase(ds) > 0;
+      let c = !work ? (hol ? "f" : lw.has(ds) ? "w lw" : "w") : brDays.has(ds) ? "b" : "";
+      if (k && k !== "arbeit") { if (k === "urlaub") c = "u"; else if (k === "urlaub_halb") c = "uh"; else if (work) c = "a"; }
+      if (work && isVac(k)) cnt += k === "urlaub_halb" ? .5 : 1;
+      if (ucSel && ds === ucSel) c = "s";
+      if (ds === today) c += " t";
+      const tip = hol ? hol : k && k !== "arbeit" ? (KINDS[k] || {}).label || "" : "";
+      cells += `<button class="uc-d ${c}" data-act="ucday" data-ds="${ds}" aria-label="${fmtShort(ds)}${tip ? " " + esc(tip) : ""}">${d}</button>`;
+    }
+    ms += `<div class="uc-m"><b>${MONTHS[m - 1]}${cnt ? `<small>${dn(cnt)} T</small>` : ""}</b><div class="uc-g">${cells}</div></div>`;
+  }
+  const sel = ucSel ? `<div class="uc-sel"><span>Ab <b>${fmtShort(ucSel)}</b>. Jetzt den letzten Urlaubstag antippen (oder denselben Tag für 1 Tag).</span><button class="btn ghost" data-act="ucclear" aria-label="Auswahl abbrechen">${ICON.x}</button></div>`
+    : `<p class="hint" style="margin:10px 0 0">Ersten und letzten Urlaubstag antippen, dann eintragen. Wochenenden und Feiertage zählen nicht als Urlaubstag.</p>`;
+  const list = blocks.length ? `<div class="list uc-blocks">${blocks.map(g => `<div class="li"><div><b>${fmtShort(g.from)}${g.to !== g.from ? " – " + fmtShort(g.to) : ""}</b> ${g.from > today ? '<span class="chip">geplant</span>' : ""}<small>${dn(vacDays(g))} Urlaubstag${vacDays(g) === 1 ? "" : "e"}${g.kind === "urlaub_halb" ? " (½ Tag)" : ""}</small></div><button class="btn ghost" data-act="delgroup" data-days="${g.days.join(",")}" aria-label="Urlaub löschen">${ICON.x}</button></div>`).join("")}</div>`
+    : `<div class="empty uc-blocks">Noch kein Urlaub in ${y} eingetragen.</div>`;
+  const sum = String(y) === today.slice(0, 4) ? `<b>${dn(v.taken + v.planned)}</b> von ${dn(v.total)} Tagen verplant · Rest <b class="${v.rest >= 0 ? "pos" : "neg"}">${dn(v.rest)}</b>` : `<b>${dn(v.taken + v.planned)}</b> Urlaubstage in ${y}`;
+  return `<section class="card" id="uc-card">
+    <div class="uc-head"><h2>Urlaubskalender</h2><div class="uc-yr"><button data-act="ucy" data-d="-1" aria-label="Voriges Jahr">${ICON.left}</button>${y}<button data-act="ucy" data-d="1" aria-label="Nächstes Jahr">${ICON.right}</button></div></div>
+    <p class="small" style="margin:0 0 10px">${sum}</p>
+    ${legend}<div class="uc-ms">${ms}</div>${sel}${list}
+  </section>`;
+}
+function ucAct(act, el) {
+  if (act === "ucy") { ucYear += +el.dataset.d; ucSel = null; render(); return; }
+  if (act === "ucclear") { ucSel = null; render(); return; }
+  if (act === "ucbridge") { ucSel = el.dataset.from; return ucAct("ucday", { dataset: { ds: el.dataset.to } }); }
+  if (act === "ucday") {
+    const ds = el.dataset.ds, r = getRec(ds);
+    if (!ucSel && r && isVac(r.kind)) { const g = ucBlocks(ds.slice(0, 4)).find(b => b.days.includes(ds)); if (g) { const b = document.querySelector(`[data-act=delgroup][data-days="${g.days.join(",")}"]`); if (b) { b.click(); return; } } }
+    if (!ucSel) { ucSel = ds; render(); return; }
+    const from = ucSel < ds ? ucSel : ds, to = ucSel < ds ? ds : ucSel;
+    let n = 0, other = 0, x = from;
+    while (x <= to) { if (sollBase(x) > 0) { n++; const k = (getRec(x) || {}).kind; if (k && k !== "arbeit" && !isVac(k)) other++; } x = addDays(x, 1); }
+    if (!n) { ucSel = null; toast("In diesem Zeitraum liegt kein Arbeitstag."); render(); return; }
+    const v = vacation(from.slice(0, 4)), same = from.slice(0, 4) === to.slice(0, 4) && from.slice(0, 4) === todayDs().slice(0, 4);
+    openSheet(`<h3>Urlaub eintragen?</h3><p class="sub">${fmtShort(from)}${to !== from ? " – " + fmtShort(to) : ""} · <b>${n} Urlaubstag${n === 1 ? "" : "e"}</b>${same ? ` · Rest danach ${dn(v.rest - n)} Tage` : ""}</p>
+      ${other ? `<p class="hint">${other} Tag${other === 1 ? " ist" : "e sind"} schon als andere Abwesenheit eingetragen und wird überschrieben.</p>` : ""}
+      <div class="sheet-actions"><button class="btn primary grow" data-act="ucok" data-from="${from}" data-to="${to}" data-k="urlaub">Eintragen</button>${n === 1 ? `<button class="btn grow" data-act="ucok" data-from="${from}" data-to="${to}" data-k="urlaub_halb">½ Tag</button>` : ""}<button class="btn grow" data-act="closesheet-btn">Abbrechen</button></div>`);
+    return;
+  }
+  if (act === "ucok") {
+    const kind = el.dataset.k; let x = el.dataset.from, n = 0;
+    while (x <= el.dataset.to) { if (sollBase(x) > 0) { const r = clone(getRec(x) || {}); r.kind = kind; setRec(x, r); n++; } x = addDays(x, 1); }
+    ucSel = null; closeSheet(); toast(`${KINDS[kind].label} für ${n} Arbeitstag${n === 1 ? "" : "e"} eingetragen.`); render();
+  }
+}
+
 function viewAbw() {
   const year = todayDs().slice(0, 4), v = vacation(year), groups = absenceGroups(year), today = todayDs();
   const opts = Object.entries(KINDS).filter(([k]) => k !== "arbeit" && k !== "feiertag").map(([k, K]) => `<option value="${k}">${esc(K.label)}${K.hint ? " (" + esc(K.hint) + ")" : ""}</option>`).join("");
@@ -1295,7 +1451,7 @@ function viewAbw() {
     return `<div class="li"><div><span class="chip ${K.cls || ""}">${esc(K.label || g.kind)}</span> ${g.from > today ? '<span class="chip">geplant</span>' : ""}<small>${fmtShort(g.from)}${g.to !== g.from ? " – " + fmtShort(g.to) : ""} · ${String(n).replace(".", ",")} Arbeitstag${n === 1 ? "" : "e"}</small></div>
       <button class="btn ghost" data-act="delgroup" data-days="${g.days.join(",")}" aria-label="Eintrag löschen">${ICON.x}</button></div>`;
   }).join("") : `<div class="empty">Noch keine Abwesenheiten in ${year}. Trag oben Urlaub, Krankenstand oder Zeitausgleich ein.</div>`;
-  return `
+  return `${ucTop()}${urlCal()}${ucBridgeCard()}
   <section class="card">
     <h2>Abwesenheit eintragen</h2>
     <form class="form" id="abs-form">
@@ -2722,6 +2878,7 @@ document.addEventListener("click", async e => {
       catch (x) { ta.focus(); ta.select(); toast("Text markiert. Jetzt kopieren."); }
       break;
     }
+    case "ucy": case "ucclear": case "ucday": case "ucok": case "ucbridge": ucAct(act, el); break;
     case "delgroup": {
       const days = el.dataset.days.split(",");
       openSheet(`<h3>Abwesenheit löschen?</h3><p class="sub">${fmtShort(days[0])}${days.length > 1 ? " – " + fmtShort(days[days.length - 1]) : ""} wird wieder als normaler Arbeitstag geführt.</p>
