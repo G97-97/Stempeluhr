@@ -861,7 +861,7 @@ const isFlex = () => S.settings.modell === "woche";
 const nurStd = () => S.settings.erfassung === "stunden";
 /* Funktionen im Profil ein-/ausblendbar (Standard: alles an). Ausblenden löscht keine Daten. */
 const FUNKTIONEN = { baust: "Baustellen (offene Arbeiten)", fotos: "Fotos pro Tag", mittag: "Mittagspause stempeln", kaffee: "Kaffeepause", betrieb: "Betrieb einstempeln", kunden: "Kunden", km: "Kilometer", projekt: "Projekt / Kostenstelle", verdienst: "Verdienst im Monat" };
-const APP_VER = "5.0";
+const APP_VER = "5.1";
 const on = k => (S.settings.zeigen || {})[k] !== false;
 /* "8", "7,5", "7.25", "7:30" → Minuten (null wenn ungültig) */
 function parseStd(v) {
@@ -2359,20 +2359,24 @@ function parseKundenListe(text) {
 }
 /* Kommissionsliste Tischlerei Höller (Stand 29.10.2026). Wird einmal pro Listenversion ergänzt:
    fehlende Nummern kommen dazu, eigene Umbenennungen und Löschungen bleiben unangetastet. */
-const KUNDEN_VER = 1;
+const KUNDEN_VER = 2;
 const DEFAULT_KUNDEN = [
-  ["26082", "Gehwolf"], ["24098", "Heitele Stefan", "Heitele"], ["25198", "Hafner Mayrhofen", "Hafner"], ["26137", "Lerch Plankenau", "Lerch"],
+  ["26082", "Gehwolf"], ["24098", "Heitele Stefan", "Heitele"], ["25198", "Hafner Mayerhofen", "Hafner"], ["26137", "Lerch Plankenau", "Lerch"],
   ["25218", "Gruber Werfenweng"], ["26070", "Petra Winetzky", "Winetzky", "Wenetzky"], ["26110", "Wallner Tennenblick", "Wallner"],
   ["26122", "Hausbacher Westernstadl", "Hausbacher"], ["26084", "Ortswärme / Biomasse", "Ortswärme", "Biomasse"], ["26002", "Nowotny"],
-  ["26085", "Gruber Maurachhof", "Maurachhof"], ["26001", "Harter Florian", "Harter"], ["26135", "Baumangut / Altenhuber", "Baumangut", "Altenhuber"],
+  ["26085", "Gruber Maurachhof", "Maurachhof"], ["26001", "Warter Florian", "Warter"], ["26135", "Baumanngut / Althuber", "Baumanngut", "Althuber"],
   ["26028", "Gifthütte"], ["26010", "Rohrmoser Kleinarl", "Rohrmoser", "Kleinarl"], ["26022", "Forster Jagdhof", "Forster", "Jagdhof"],
   ["26008", "Streif B-Hofen", "Streif"], ["26148", "Ostler Wagrain", "Ostler"], ["26117", "Lottermoser Alpenflora", "Lottermoser", "Alpenflora"],
   ["26155", "Schnell Auhofalm", "Schnell", "Auhofalm"], ["26156", "Dertnig Wagrain", "Dertnig"],
   ["26169", "Jenerwein Burglehen", "Jenerwein"], ["26165", "Baldauf"], ["26158", "Eisl / Mayr Alpendorf", "Eisl", "Mayr Alpendorf"], ["26152", "Oberauer Hotel Wagrain", "Oberauer"],
+  ["26173", "Wallner Ferienhaus Regina", "Ferienhaus Regina"], ["26144", "Fischbacher"],
 ];
+/* Namen, die früher falsch von der Kommissionsliste abgelesen wurden: alter Name bleibt als Kurzname erhalten */
+const KUNDEN_FIX = { "25198": ["Hafner Mayrhofen", "Hafner Mayerhofen"], "26001": ["Harter Florian", "Warter Florian"], "26135": ["Baumangut / Altenhuber", "Baumanngut / Althuber"] };
 function mergeDefaultKunden() {
   if ((S.settings.kstammVer || 0) >= KUNDEN_VER) return;
   const st = { ...kstamm() };
+  for (const [nr, [alt0, neu]] of Object.entries(KUNDEN_FIX)) { const e = st[nr]; if (e && normName(e.name) === normName(alt0)) st[nr] = { ...e, name: neu, alt: [...new Set([...(e.alt || []), alt0])], at: Date.now() }; }
   for (const [nr, name, ...alt] of DEFAULT_KUNDEN) {
     if (st[nr]) continue;
     // Kurznamen, die schon ein anderer Kunde im Stamm benutzt, nicht doppelt vergeben
