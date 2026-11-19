@@ -328,17 +328,31 @@ body.printing { overflow: hidden; }
 @media (min-width: 560px) { .uc-ms { grid-template-columns: repeat(3, minmax(0,1fr)); } }
 .uc-m b { display: block; font-size: 13px; margin-bottom: 4px; }
 .uc-m b small { font-weight: 600; color: var(--accent); margin-left: 4px; }
-.uc-g { display: grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap: 2px; }
+.uc-g { display: grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap: 3px 0; }
 .uc-g span { font-size: 9.5px; color: var(--muted); text-align: center; }
 .uc-d { appearance: none; border: 0; padding: 0; aspect-ratio: 1; min-width: 0; border-radius: 5px; background: transparent; color: var(--ink); font: 600 11px/1 var(--f-num); font-variant-numeric: tabular-nums; cursor: pointer; }
 .uc-d.w { color: var(--muted); opacity: .55; }
-.uc-d.f { color: var(--break); background: var(--break-soft); opacity: 1; }
-.uc-d.lw { background: var(--break-soft); opacity: .8; }
-.uc-d.b { box-shadow: inset 0 0 0 2px var(--break); }
+.uc-d { margin: 0 1px; }
+.uc-d.f { color: #fff; background: var(--danger); opacity: 1; }
+.uc-d.b { background: repeating-linear-gradient(135deg, var(--break) 0 4px, var(--break-soft) 4px 8px); color: var(--ink); box-shadow: inset 0 0 0 2px var(--break); font-weight: 800; }
+.uc-d.b { text-shadow: 0 0 3px var(--surface), 0 0 3px var(--surface); }
+.uc-d.z { background: var(--blue); color: #fff; }
+/* Urlaubsband: von erstem bis letztem Urlaubstag durchgehend */
+.uc-d.ub { margin: 0; border-radius: 0; background: color-mix(in srgb, var(--accent) 38%, var(--surface)); color: var(--ink); opacity: 1; }
+.uc-d.ub.u { background: var(--accent); color: var(--accent-ink); }
+.uc-d.ub.f { background: color-mix(in srgb, var(--accent) 38%, var(--surface)); color: var(--danger); font-weight: 800; }
+.uc-d.ubs, .uc-d.ub.mo { border-top-left-radius: 8px; border-bottom-left-radius: 8px; }
+.uc-d.ube, .uc-d.ub.so { border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
+.uc-bl { margin: 0 0 14px; display: grid; gap: 6px; }
+.uc-bl .bk { display: flex; align-items: center; gap: 10px; padding: 9px 10px 9px 12px; border-radius: 10px; background: var(--accent-soft); border-left: 5px solid var(--accent); }
+.uc-bl .bk div { flex: 1; min-width: 0; }
+.uc-bl .bk b { display: block; font-size: 15px; }
+.uc-bl .bk small { color: var(--muted); font-size: 12.5px; }
+.uc-bl .bk.past { opacity: .6; }
 .uc-d.a { background: var(--violet-soft); color: var(--violet); }
 .uc-d.u { background: var(--accent); color: var(--accent-ink); }
 .uc-d.uh { background: linear-gradient(135deg, var(--accent) 50%, var(--accent-soft) 50%); color: var(--ink); }
-.uc-d.t { box-shadow: inset 0 0 0 2px var(--accent); }
+.uc-d.t { box-shadow: inset 0 0 0 2px var(--blue); }
 .uc-d.s { background: var(--blue); color: #fff; }
 .uc-sel { margin: 10px 0 0; padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); font-size: 14px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .uc-blocks { margin-top: 14px; }
@@ -1338,7 +1352,7 @@ const vacDays = g => g.days.filter(x => sollBase(x) > 0).length * (g.kind === "u
 const dn = n => String(n).replace(".", ",");
 
 /* Freie Tage: Wochenende, Feiertag oder schon Urlaub */
-const ucFree = ds => { if (sollBase(ds) === 0) return true; const r = getRec(ds); return !!(r && r.kind === "urlaub"); };
+const ucFree = ds => { if (sollBase(ds) === 0) return true; const r = getRec(ds); return !!(r && (r.kind === "urlaub" || r.kind === "za")); };
 function ucRun(ds, dir) { const out = []; let x = addDays(ds, dir); while (ucFree(x) && out.length < 40) { out.push(x); x = addDays(x, dir); } return out; }
 /* Brückentage: 1–2 Arbeitstage zwischen freien Tagen, wo ein Feiertag beteiligt ist */
 function ucBridges(year) {
@@ -1388,17 +1402,19 @@ function ucBridgeCard() {
   return `<section class="card uc-br"><h2>Brückentag-Tipps ${ucYear}</h2><p class="hint" style="margin:0 0 8px">Mit wenig Urlaub viele freie Tage am Stück.</p><div class="list">${list.map(b => `<div class="li"><div><b>${b.days.length} Tag${b.days.length === 1 ? "" : "e"} Urlaub → ${b.total} Tage frei</b><small>${b.days.map(fmtShort).join(", ")} · ${esc(b.hol || "")} · frei ${fmtShort(b.from)} – ${fmtShort(b.to)}</small></div><button class="btn" data-act="ucbridge" data-from="${b.days[0]}" data-to="${b.days[b.days.length - 1]}">Eintragen</button></div>`).join("")}</div></section>`;
 }
 function urlCal() {
-  const y = ucYear, today = todayDs(), v = vacation(String(y)), blocks = ucBlocks(y), br = ucBridges(y), brDays = new Set(br.flatMap(b => b.days)), lw = new Set(br.flatMap(b => b.free));
-  const legend = `<div class="uc-leg"><span><i style="background:var(--accent)"></i>Urlaub</span><span><i style="background:linear-gradient(135deg,var(--accent) 50%,var(--accent-soft) 50%)"></i>½ Tag</span><span><i style="background:var(--break-soft);border:1px solid var(--break)"></i>Feiertag</span><span><i style="box-shadow:inset 0 0 0 2px var(--break)"></i>Brückentag</span><span><i style="background:var(--violet-soft)"></i>Krank / andere</span></div>`;
+  const y = ucYear, today = todayDs(), v = vacation(String(y)), blocks = ucBlocks(y), br = ucBridges(y), brDays = new Set(br.flatMap(b => b.days).filter(d => d > today)), band = {};
+  for (const g of blocks) for (let x = g.from; x <= g.to; x = addDays(x, 1)) band[x] = (x === g.from ? " ubs" : "") + (x === g.to ? " ube" : "");
+  const legend = `<div class="uc-leg"><span><i style="background:var(--accent)"></i>Urlaubstag</span><span><i style="background:color-mix(in srgb,var(--accent) 38%,var(--surface))"></i>Wochenende im Urlaub</span><span><i style="background:var(--danger)"></i>Feiertag</span><span><i style="background:repeating-linear-gradient(135deg,var(--break) 0 3px,var(--break-soft) 3px 6px);box-shadow:inset 0 0 0 1.5px var(--break)"></i>Brückentag-Tipp: frei nehmen lohnt sich</span><span><i style="background:var(--blue)"></i>Zeitausgleich</span><span><i style="background:var(--violet-soft)"></i>Krank / andere</span><span><i style="box-shadow:inset 0 0 0 2px var(--blue)"></i>Heute</span></div>`;
   let ms = "";
   for (let m = 1; m <= 12; m++) {
     const mk = `${y}-${String(m).padStart(2, "0")}`, first = parseDs(mk + "-01"), nd = new Date(y, m, 0).getDate();
     let cells = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"].map(w => `<span>${w[0]}</span>`).join("") + "<i></i>".repeat((first.getDay() + 6) % 7), cnt = 0;
     for (let d = 1; d <= nd; d++) {
       const ds = `${mk}-${String(d).padStart(2, "0")}`, r = getRec(ds), k = r && r.kind, hol = holidayName(ds), work = sollBase(ds) > 0;
-      let c = !work ? (hol ? "f" : lw.has(ds) ? "w lw" : "w") : brDays.has(ds) ? "b" : "";
-      if (k && k !== "arbeit") { if (k === "urlaub") c = "u"; else if (k === "urlaub_halb") c = "uh"; else if (work) c = "a"; }
+      let c = !work ? (hol ? "f" : "w") : brDays.has(ds) ? "b" : "";
+      if (k && k !== "arbeit") { if (k === "urlaub") c = "u"; else if (k === "urlaub_halb") c = "uh"; else if (k === "za" && work) c = "z"; else if (work) c = "a"; }
       if (work && isVac(k)) cnt += k === "urlaub_halb" ? .5 : 1;
+      if (band[ds] !== undefined) { const wd = parseDs(ds).getDay(); c = c.replace(/\b[wb]\b/g, "").replace(/\buh\b/, "u") + " ub" + band[ds] + (wd === 1 ? " mo" : wd === 0 ? " so" : ""); }
       if (ucSel && ds === ucSel) c = "s";
       if (ds === today) c += " t";
       const tip = hol ? hol : k && k !== "arbeit" ? (KINDS[k] || {}).label || "" : "";
@@ -1414,7 +1430,8 @@ function urlCal() {
   return `<section class="card" id="uc-card">
     <div class="uc-head"><h2>Urlaubskalender</h2><div class="uc-yr"><button data-act="ucy" data-d="-1" aria-label="Voriges Jahr">${ICON.left}</button>${y}<button data-act="ucy" data-d="1" aria-label="Nächstes Jahr">${ICON.right}</button></div></div>
     <p class="small" style="margin:0 0 10px">${sum}</p>
-    ${legend}<div class="uc-ms">${ms}</div>${sel}${list}
+    ${blocks.length ? `<div class="uc-bl">${blocks.map(g => { let fr = 0; const b0 = ucRun(g.from, -1), b1 = ucRun(g.to, 1); for (let x = b0.length ? b0[b0.length - 1] : g.from, e = b1.length ? b1[b1.length - 1] : g.to; x <= e; x = addDays(x, 1)) fr++; const n = vacDays(g); return `<div class="bk${g.to < today ? " past" : ""}"><div><b>${fmtShort(g.from)}${g.to !== g.from ? " – " + fmtShort(g.to) : ""}</b><small>${dn(n)} Urlaubstag${n === 1 ? "" : "e"}${g.kind === "urlaub_halb" ? " (½ Tag)" : ""}${fr > n ? ` · ${fr} Tage frei am Stück` : ""}${g.to < today ? " · vorbei" : g.from > today ? "" : " · jetzt"}</small></div><button class="btn ghost" data-act="delgroup" data-days="${g.days.join(",")}" aria-label="Urlaub löschen">${ICON.x}</button></div>`; }).join("")}</div>` : `<div class="empty uc-blocks" style="margin:0 0 14px">Noch kein Urlaub in ${y} eingetragen.</div>`}
+    ${legend}<div class="uc-ms">${ms}</div>${sel}
   </section>`;
 }
 function ucAct(act, el) {
