@@ -50,14 +50,17 @@ h = hashlib.sha256()
 for f in files[1:]: h.update(open(os.path.join(W, f), "rb").read())
 ver = h.hexdigest()[:10]
 open(W + "/sw.js", "w").write(f"""// Stempeluhr Offline-Cache (Version {ver})
-const CACHE = "stempeluhr-{ver}";
+const CACHE = "stempeluhr-{ver}", OCR = "stempeluhr-ocr-5.1.1";
 const FILES = {json.dumps(files)};
 self.addEventListener("install", e => {{ e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); }});
-self.addEventListener("activate", e => {{ e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); }});
+self.addEventListener("activate", e => {{ e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE && k !== OCR).map(k => caches.delete(k)))).then(() => self.clients.claim())); }});
 self.addEventListener("fetch", e => {{
   if (e.request.method !== "GET") return;
+  if (e.request.url.includes("/ocr/")) {{ e.respondWith(caches.open(OCR).then(c => c.match(e.request, {{ ignoreSearch: true }}).then(r => r || fetch(e.request).then(res => {{ if (res.ok) c.put(e.request, res.clone()); return res; }})))); return; }}
   e.respondWith(caches.match(e.request, {{ ignoreSearch: true }}).then(r => r || fetch(e.request).catch(() => caches.match("index.html"))));
 }});
 """)
+# Texterkennung (nur Web-App, wird erst beim ersten Gebrauch geladen und dann offline gehalten)
+shutil.copytree(os.path.join(ROOT, "ocr"), W + "/ocr")
 open(W + "/.nojekyll", "w").write("")
 print("web", ver, sorted(os.listdir(W)))

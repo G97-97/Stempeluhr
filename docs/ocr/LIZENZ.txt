@@ -1,0 +1,2 @@
+Texterkennung: tesseract.js 5.1.1, tesseract.js-core 5.1.1 (Apache License 2.0, https://github.com/naptha/tesseract.js)
+Sprachdaten: deu.traineddata 4.0.0_best_int aus @tesseract.js-data/deu 1.0.0 (Apache License 2.0, Tesseract OCR)

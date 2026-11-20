@@ -395,6 +395,13 @@ body.printing { overflow: hidden; }
 .fd-cap { font-size: 13px; color: var(--muted); margin-top: 5px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .fd-note { font-size: 14.5px; margin-top: 3px; white-space: pre-wrap; }
 .lnk { border: 0; background: none; color: var(--accent); font: inherit; font-weight: 700; padding: 0; text-transform: none; letter-spacing: 0; }
+
+.ocr-lines { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ocr-lines button { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 6px 9px; font-size: 13.5px; text-align: left; }
+.ocr-box { border: 1px dashed var(--line); border-radius: 12px; padding: 10px 12px; margin: 0 0 12px; }
+.ocr-box summary { font-size: 13.5px; font-weight: 600; cursor: pointer; }
+.ocr-bar { height: 10px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin: 14px 0 8px; }
+.ocr-bar i { display: block; height: 100%; width: 3%; background: var(--accent); transition: width .3s; }
 </style>
 
 <div class="app">
@@ -2255,19 +2262,22 @@ function openKsEdit(nr, name, pre) {
   openSheet(`<h3>${e ? "Kunde bearbeiten" : "Neuer Kunde"}</h3><p class="sub">${v.foto ? "Vergleiche die Felder mit dem Datenblatt. Tippe auf das Foto zum Vergrößern." : e ? "Wenn sich der Name ändert, bleibt der alte als „früher“ gespeichert." : "Nummer und Name eintragen, oder das Kundendatenblatt fotografieren."}</p>
     ${v.foto ? `<div class="ks-foto" data-act="kszoom" data-id="${esc(v.foto)}"><span class="hint" style="display:block;padding:20px">Foto wird geladen …</span></div>` : ""}
     <div class="btn-row" style="margin:0 0 12px"><button class="btn grow" type="button" data-act="ksfotocam">📷 ${v.foto ? "Neu fotografieren" : "Datenblatt fotografieren"}</button><button class="btn grow" type="button" data-act="ksfotogal">Aus Galerie</button></div>
+    ${pre && pre.lines && pre.lines.length ? `<details class="ocr-box"${pre.ocr ? "" : " open"}><summary>Erkannter Text (${pre.lines.length} Zeilen)</summary><p class="hint" style="margin:6px 0 0">Erst ein Feld unten antippen, dann hier die passende Zeile. Sie wird dort eingetragen.</p><div class="ocr-lines">${pre.lines.map(l => `<button type="button" data-act="ocrline">${esc(l)}</button>`).join("")}</div></details>` : ""}
     <form class="form" id="ks-form" data-old="${esc(nr || "")}" data-from="${esc(name || "")}" data-foto="${esc(v.foto || "")}">
       <div class="grid2"><div class="field"><label for="ks-nr">Kundennummer</label><input id="ks-nr" inputmode="numeric" autocomplete="off" value="${esc(v.nr || "")}" required></div>
         <div class="field"><label for="ks-name">Name</label><input id="ks-name" autocomplete="off" value="${esc(v.name || name || "")}" required></div></div>
       ${KS_F.map(([k, l, ph]) => `<div class="field"><label for="ks-${k}">${l}</label><input id="ks-${k}" autocomplete="off" ${k === "tel" ? 'inputmode="tel"' : k === "mail" ? 'inputmode="email"' : ""} value="${esc(v[k] || "")}" placeholder="${esc(ph)}">${k === "tel" && v.tel ? `<a class="ks-tel" href="tel:${esc(v.tel.replace(/[^\d+]/g, ""))}">📞 Anrufen</a>` : ""}</div>`).join("")}
       <div class="field"><label for="ks-notiz">Notiz</label><textarea id="ks-notiz" placeholder="z. B. Schlüssel beim Nachbarn, Zufahrt über Hof">${esc(v.notiz || "")}</textarea></div>
       ${e && (e.alt || []).length ? `<p class="hint" style="margin:0">Früher: ${esc(e.alt.join(", "))}</p>` : ""}
-      ${pre && pre.ocr ? `<p class="hint" style="margin:0">✨ Einige Felder wurden aus dem Foto vorausgefüllt. Bitte prüfen.</p>` : ""}
+      ${pre && pre.ocr ? `<p class="hint" style="margin:0">✨ Felder wurden aus dem Foto vorausgefüllt. Bitte mit dem Foto vergleichen.</p>` : ""}
       <div id="ks-err" class="err" hidden></div>
       <div class="sheet-actions"><button class="btn primary grow" type="submit">Speichern</button><button class="btn grow" type="button" data-act="ksopen">Zurück</button></div>
       ${e ? `<button class="btn ghost" type="button" data-act="ksdel" data-nr="${esc(e.nr)}" style="width:100%;color:var(--danger)">Aus Kundenliste löschen</button>` : ""}
     </form>`);
   if (v.foto) ksFotoShow(v.foto);
+  ksLast = null; $("ks-form").addEventListener("focusin", e => { if (e.target.id && e.target.id.startsWith("ks-")) ksLast = e.target.id; });
 }
+let ksLast = null;
 async function ksFotoShow(id) {
   const box = document.querySelector(".ks-foto"); if (!box) return;
   const f = await fotoGet(id).catch(() => null);
@@ -2283,20 +2293,57 @@ function ksDraft() {
   for (const [k] of KS_F) d[k] = $("ks-" + k).value.trim();
   return { nr: f.dataset.old, name: f.dataset.from, draft: d };
 }
-/* Texterkennung nur, wenn das Handy sie eingebaut hat (ohne Internet, ohne fremden Dienst) */
-async function ksOcr(blob) {
-  if (!("TextDetector" in window)) return "";
-  try { const bmp = await createImageBitmap(blob), r = await new window.TextDetector().detect(bmp); if (bmp.close) bmp.close(); return r.map(x => x.rawValue).join("\n"); } catch (e) { return ""; }
+/* Texterkennung direkt am Handy (Tesseract). Das Programm (ca. 9 MB) wird beim ersten Mal geladen und
+   danach offline gehalten. Das Foto verlässt das Handy dabei nicht. */
+let ocrW = null;
+const loadScript = src => new Promise((res, rej) => { const sc = document.createElement("script"); sc.src = src; sc.onload = res; sc.onerror = () => rej(new Error("Texterkennung konnte nicht geladen werden")); document.head.appendChild(sc); });
+function ocrWorker(prog) {
+  if (!ocrW) ocrW = (async () => {
+    if (!window.Tesseract) await loadScript("ocr/tesseract.min.js");
+    return window.Tesseract.createWorker("deu", 1, { workerPath: "ocr/worker.min.js", corePath: "ocr", langPath: "ocr", gzip: true, workerBlobURL: false, logger: m => ocrProg && ocrProg(m) });
+  })().catch(e => { ocrW = null; throw e; });
+  return ocrW;
 }
+let ocrProg = null;
+// Graustufen + Kontrast, max. 2000 px: liest Fotos vom Papier deutlich besser
+async function ocrPrep(blob) {
+  const img = await fotoDecode(blob), w = img.naturalWidth || img.width, h = img.naturalHeight || img.height, k = Math.min(1, 2000 / Math.max(w, h));
+  const cv = document.createElement("canvas"); cv.width = Math.round(w * k); cv.height = Math.round(h * k);
+  const g = cv.getContext("2d"); g.filter = "grayscale(1) contrast(1.5)"; g.drawImage(img, 0, 0, cv.width, cv.height); if (img.close) img.close();
+  return cv;
+}
+async function ksOcr(blob) {
+  if ("TextDetector" in window) { try { const bmp = await createImageBitmap(blob), r = await new window.TextDetector().detect(bmp); if (bmp.close) bmp.close(); if (r.length) return r.map(x => x.rawValue).join("\n"); } catch (e) {} }
+  if (window.AndroidBridge || !window.Worker || !window.WebAssembly) return { err: "Texterkennung geht nur in der Web-App (g97-97.github.io/Stempeluhr)." };
+  openSheet(`<h3>Datenblatt wird gelesen …</h3><p class="sub" id="ocr-st">Texterkennung wird gestartet</p><div class="ocr-bar"><i id="ocr-p"></i></div><p class="hint">Beim ersten Mal wird das Erkennungsprogramm geladen (ca. 9 MB, am besten im WLAN). Danach geht es auch ohne Internet. Das Foto bleibt auf deinem Handy.</p>`);
+  ocrProg = m => { const st = $("ocr-st"), pb = $("ocr-p"); if (!st) return; const t = { "loading tesseract core": "Programm wird geladen", "initializing tesseract": "Wird vorbereitet", "loading language traineddata": "Deutsch wird geladen", "initializing api": "Wird vorbereitet", "recognizing text": "Text wird erkannt" }[m.status] || "Bitte warten"; st.textContent = t + (m.progress ? ` · ${Math.round(m.progress * 100)} %` : " …"); if (pb) pb.style.width = Math.max(3, Math.round((m.status === "recognizing text" ? 50 + m.progress * 50 : (m.progress || 0) * 50))) + "%"; };
+  try { const w = await ocrWorker(), cv = await ocrPrep(blob), r = await w.recognize(cv); cv.width = cv.height = 0; return (r.data && r.data.text) || ""; }
+  catch (e) { return { err: navigator.onLine === false ? "Die Texterkennung braucht beim ersten Mal Internet. Felder bitte selbst ausfüllen oder später neu fotografieren." : `Texterkennung hat nicht geklappt (${(e && e.message) || e}).` }; }
+  finally { ocrProg = null; }
+}
+const KS_LBL = [[/^(kommission|komm|auftrag|kunden|projekt)[\w.\s-]*?(nr|nummer|no)?\.?$/i, "nr"], [/^(kunde|kundenname|name|bauherr|auftraggeber|kommission\s*name|firma)$/i, "name"],
+  [/^(stra(ß|ss)e|adresse|anschrift|baustelle|objekt)$/i, "adr"], [/^(ort|plz|plz\s*\/?\s*ort|wohnort)$/i, "adr"], [/^(ansprechpartner|kontakt|kontaktperson|ansprechperson)$/i, "kontakt"],
+  [/^(tel|telefon|tel\.?\s*nr|mobil|handy|telefonnummer)\.?$/i, "tel"], [/^(e-?mail|mail)$/i, "mail"], [/^(bemerkung|notiz|info|hinweis|anmerkung)$/i, "notiz"]];
+const ocrStrip = l => l.replace(/^[^:]{2,30}:\s*/, "");
 function ksGuess(text) {
-  const g = {}, lines = String(text || "").split(/\n/).map(l => l.trim()).filter(Boolean);
+  const g = {}, lines = String(text || "").split(/\n/).map(l => l.replace(/\s+/g, " ").trim()).filter(Boolean);
   if (!lines.length) return g;
+  // 1. "Bezeichnung: Wert"
+  for (const l of lines) {
+    const m = l.match(/^([^:]{2,30}):\s*(.+)$/); if (!m) continue;
+    const hit = KS_LBL.find(([re]) => re.test(m[1].trim())); if (!hit) continue;
+    const f = hit[1], v = m[2].trim();
+    if (f === "nr") { const n = v.match(/\d{3,10}/); if (n && !g.nr) g.nr = n[0]; }
+    else if (f === "adr" || f === "notiz") g[f] = g[f] ? g[f] + ", " + v : v;
+    else if (!g[f]) g[f] = v;
+  }
+  // 2. Ohne Bezeichnung erkennen
   const all = lines.join("\n");
-  const nr = all.match(/(?:Kommission|Komm\.?|Auftrag|Kunden)[^\d\n]{0,20}(\d{4,6})/i) || all.match(/\b(2\d{4})\b/); if (nr) g.nr = nr[1];
-  const mail = all.match(/[\w.+-]+@[\w-]+\.[\w.]+/); if (mail) g.mail = mail[0];
-  const tel = all.match(/(?:Tel|Telefon|Mobil|Handy)[.:\s]*(\+?[\d][\d \/-]{6,}\d)/i) || all.match(/(\+43[\d \/-]{6,}\d|\b0\d{2,4}[ \/-]?\d{3,}[\d \/-]*\d)/); if (tel) g.tel = tel[1].trim();
-  const adr = lines.find(l => /\b\d{4}\s+[A-ZÄÖÜ][a-zäöüß]/.test(l)); if (adr) { const i = lines.indexOf(adr), prev = lines[i - 1]; g.adr = prev && /\d/.test(prev) && !/@/.test(prev) && prev !== (tel && tel[0]) ? `${prev}, ${adr}` : adr; }
-  const name = all.match(/(?:Kunde|Name|Bauherr|Kommission\s*Name)[:\s]+([^\n]{3,50})/i); if (name) g.name = name[1].trim();
+  if (!g.nr) { const nr = all.match(/(?:Kommission|Komm\.?|Auftrag|Kunden)[^\d\n]{0,20}(\d{4,6})/i) || all.match(/\b(2\d{4})\b/); if (nr) g.nr = nr[1]; }
+  if (!g.mail) { const mail = all.match(/[\w.+-]+@[\w-]+\.[\w.]+/); if (mail) g.mail = mail[0]; }
+  if (!g.tel) { const tel = all.match(/(\+43[\d \/-]{6,}\d|\b0\d{2,4}[ \/-]?\d{3,}[\d \/-]*\d)/); if (tel) g.tel = tel[1].trim(); }
+  if (!g.adr) { const adr = lines.find(l => /\b\d{4}\s+[A-ZÄÖÜ][a-zäöüß]/.test(l)); if (adr) { const i = lines.indexOf(adr), prev = lines[i - 1]; g.adr = prev && /\d/.test(prev) && !/@/.test(prev) && !/^\+?0\d/.test(prev) ? `${ocrStrip(prev)}, ${ocrStrip(adr)}` : ocrStrip(adr); } }
+  if (g.mail) g.mail = g.mail.replace(/\s+/g, "");
   return g;
 }
 async function ksFotoFiles(files) {
@@ -2307,9 +2354,11 @@ async function ksFotoFiles(files) {
     const blob = await fotoShrink(file), data = await blob.arrayBuffer(), at = Date.now(), id = `kd-${at}-${Math.random().toString(36).slice(2, 8)}`;
     await fotoPut({ id, ds: "kunde", at, type: blob.type || "image/jpeg", data });
     const old = ctx.draft.foto; if (old && old !== id && !(Object.values(kstamm()).some(e => e.foto === old))) fotoTx("readwrite", st => st.delete(old)).catch(() => {});
-    const guess = ksGuess(await ksOcr(blob)), pre = { ...ctx.draft, foto: id };
+    const res = await ksOcr(blob), text = typeof res === "string" ? res : "", guess = ksGuess(text), pre = { ...ctx.draft, foto: id };
     let used = false; for (const [k, val] of Object.entries(guess)) if (val && !pre[k]) { pre[k] = val; used = true; }
     if (used) pre.ocr = true;
+    pre.lines = text.split(/\n/).map(l => l.replace(/\s+/g, " ").trim()).filter(l => l.length > 1 && /[A-Za-zÄÖÜäöü0-9]{2}/.test(l)).slice(0, 40);
+    if (res && res.err) toast(res.err); else if (!pre.lines.length) toast("Auf dem Foto wurde kein Text erkannt. Bitte gerade und scharf fotografieren.");
     openKsEdit(ctx.nr, ctx.name, pre);
   } catch (e) { toast(`Foto konnte nicht gespeichert werden (${(e && e.message) || "Fehler"}).`); }
 }
@@ -2916,6 +2965,13 @@ document.addEventListener("click", async e => {
     case "ksfotocam": ksFotoFor = ksDraft(); $("foto-cam").click(); break;
     case "ksfotogal": ksFotoFor = ksDraft(); $("foto-file").click(); break;
     case "kszoom": el.classList.toggle("big"); break;
+    case "ocrline": { const f = ksLast && $(ksLast); if (!f) { toast("Zuerst unten ein Feld antippen (z. B. Adresse), dann die Zeile."); break; }
+      const t = ocrStrip(el.textContent.trim());
+      if (ksLast === "ks-nr") f.value = (t.match(/\d{3,10}/) || [t])[0];
+      else if (f.tagName === "TEXTAREA") f.value = f.value ? f.value + "\n" + t : t;
+      else f.value = f.dataset.ocr === "1" && f.value ? f.value + ", " + t : t;
+      f.dataset.ocr = "1";
+      el.style.opacity = ".45"; break; }
     case "fotoadd": ksFotoFor = null; fotoTarget = el.dataset.ds; fotoTargetK = el.dataset.k || fotoAutoK(el.dataset.ds); $("foto-cam").click(); break;
     case "fotogal": ksFotoFor = null; fotoTarget = el.dataset.ds; fotoTargetK = el.dataset.k || fotoAutoK(el.dataset.ds); $("foto-file").click(); break;
     case "fotoview": openFoto(el.dataset.id, el.dataset.back); break;
@@ -2924,7 +2980,7 @@ document.addEventListener("click", async e => {
     case "fotonote": { await fotoMeta(el.dataset.id, { note: $("fd-note").value.trim() }); hydrateFotos(true); toast("Notiz gespeichert."); if (el.dataset.back) openFotoDoku(el.dataset.back); else closeSheet(); break; }
     case "tmsync": tmSync(true); break;
     case "appupdate": { el.disabled = true; el.textContent = "Wird aktualisiert …";
-      try { if (navigator.serviceWorker) for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); if (window.caches) for (const k of await caches.keys()) await caches.delete(k); } catch (x) {}
+      try { if (navigator.serviceWorker) for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); if (window.caches) for (const k of await caches.keys()) if (!k.startsWith("stempeluhr-ocr")) await caches.delete(k); } catch (x) {}
       location.replace(location.pathname + "?v=" + Date.now()); break; }
     case "bspdf": { const key = el.dataset.k, label = bsLabelByKey(key); el.disabled = true; el.textContent = "PDF wird erstellt …";
       try { const pdf = await baustPdf(key, label); await shareOrSave(`Baustelle_${label.replace(/[^\wäöüÄÖÜß-]+/g, "_").replace(/_+/g, "_").slice(0, 50)}_${todayDs()}.pdf`, pdf, `Baustelle ${label}`); }
