@@ -373,6 +373,13 @@ body.printing { overflow: hidden; }
 .uc-za b { font-family: var(--f-num); }
 .uc-br .li b { font-size: 14.5px; }
 .uc-gain { font: 700 13px var(--f-num); color: var(--break); white-space: nowrap; }
+
+/* Kundendatenblatt */
+.ks-foto { position: relative; max-height: 46vh; overflow: auto; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); margin: 0 0 10px; -webkit-overflow-scrolling: touch; }
+.ks-foto img { display: block; width: 100%; height: auto; }
+.ks-foto.big img { width: 220%; max-width: none; }
+.ks-foto .zoom { position: sticky; left: 8px; bottom: 8px; display: inline-block; margin: -38px 0 8px 8px; padding: 4px 10px; border-radius: 999px; background: rgba(0,0,0,.6); color: #fff; font-size: 12px; pointer-events: none; }
+.ks-tel { display: inline-block; margin-top: 4px; font-size: 14px; font-weight: 600; color: var(--accent); }
 </style>
 
 <div class="app">
@@ -1018,7 +1025,7 @@ function fotoCard(ds) {
     ${fotoStrip(ds)}<div class="foto-vortag" data-ds="${ds}"></div></section>`;
 }
 // fotoTarget kann nach dem Kamera-Wechsel verloren sein (Seite neu geladen) → dann heute
-for (const id of ["foto-cam", "foto-file"]) $(id).addEventListener("change", e => { const fs = [...e.target.files]; e.target.value = ""; if (fs.length) fotoAddFiles(fs, fotoTarget || todayDs(), fotoTargetK).catch(x => toast(`Foto konnte nicht gespeichert werden (${(x && x.name) || "Fehler"} ${(x && x.message) || ""}).`)); });
+for (const id of ["foto-cam", "foto-file"]) $(id).addEventListener("change", e => { const fs = [...e.target.files]; e.target.value = ""; if (fs.length && ksFotoFor) ksFotoFiles(fs); else if (fs.length) fotoAddFiles(fs, fotoTarget || todayDs(), fotoTargetK).catch(x => toast(`Foto konnte nicht gespeichert werden (${(x && x.name) || "Fehler"} ${(x && x.message) || ""}).`)); });
 
 function render() {
   if (tab === "baust" && !on("baust")) tab = "heute";
@@ -1558,7 +1565,8 @@ function viewProfil() {
     return `<section class="card">
     <div class="row"><h2 style="margin:0">Kundenstamm</h2><span class="num" style="color:var(--muted);font-size:13px">${st.length} Kunden</span></div>
     <p class="hint" style="margin:6px 0 10px">Jeder Kunde hat eine feste Nummer. Der Name darf sich ändern, die Nummer bleibt. Beim Eintragen reicht die Nummer, z. B. „1234“.</p>
-    <div class="btn-row"><button class="btn primary grow" data-act="ksopen">Kundenliste öffnen</button><button class="btn grow" data-act="kspaste">Liste einfügen</button></div>
+    <button class="btn primary" style="width:100%;margin-bottom:8px" data-act="ksfotonew">📷 Kundendatenblatt fotografieren</button>
+    <div class="btn-row"><button class="btn grow" data-act="ksopen">Kundenliste öffnen</button><button class="btn grow" data-act="kspaste">Liste einfügen</button></div>
     ${ohne.length ? `<p class="hint" style="margin:10px 0 0"><b>${ohne.length} ${ohne.length === 1 ? "Kunde" : "Kunden"} ohne Nummer:</b> ${ohne.slice(0, 8).map(esc).join(", ")}${ohne.length > 8 ? " …" : ""}. In der Kundenliste kannst du Nummern zuordnen.</p>` : ""}
   </section>`; })()}
   <section class="card">
@@ -2197,22 +2205,74 @@ function openKstamm(q = "") {
   const nq = normName(q), hit = e => !nq || e.nr.includes(nq) || normName(e.name).includes(nq) || (e.alt || []).some(a => normName(a).includes(nq));
   openSheet(`<h3>Kundenliste</h3><p class="sub">${st.length} Kunden mit Nummer</p>
     <div class="field"><label for="ks-q">Suchen (Nummer oder Name)</label><input id="ks-q" autocomplete="off" value="${esc(q)}" placeholder="z. B. 1234 oder Huber"></div>
-    <div class="btn-row" style="margin:10px 0"><button class="btn primary grow" data-act="ksedit" data-nr="">+ Neuer Kunde</button><button class="btn grow" data-act="kspaste">Liste einfügen</button></div>
-    <div class="list ks-list">${st.filter(hit).map(e => `<button class="li ks-row" data-act="ksedit" data-nr="${esc(e.nr)}"><div><b><span class="knr">${esc(e.nr)}</span> ${esc(e.name)}</b>${(e.alt || []).length ? `<small>früher: ${esc(e.alt.join(", "))}</small>` : ""}</div>${ICON.pen}</button>`).join("") || '<p class="hint">Keine Treffer.</p>'}</div>
+    <div class="btn-row" style="margin:10px 0"><button class="btn primary grow" data-act="ksfotonew">📷 Datenblatt</button><button class="btn grow" data-act="ksedit" data-nr="">+ Neuer Kunde</button></div>
+    <div class="list ks-list">${st.filter(hit).map(e => `<button class="li ks-row" data-act="ksedit" data-nr="${esc(e.nr)}"><div><b><span class="knr">${esc(e.nr)}</span> ${esc(e.name)}${e.foto ? " 📄" : ""}</b>${e.adr || e.tel ? `<small>${esc([e.adr, e.tel].filter(Boolean).join(" · "))}</small>` : ""}${(e.alt || []).length ? `<small>früher: ${esc(e.alt.join(", "))}</small>` : ""}</div>${ICON.pen}</button>`).join("") || '<p class="hint">Keine Treffer.</p>'}</div>
     ${ohne.length && !nq ? `<div class="lbl" style="margin-top:14px">Ohne Nummer (aus deinen Einträgen)</div><div class="list">${ohne.map(n => `<button class="li ks-row" data-act="ksedit" data-nr="" data-name="${esc(n)}"><div><b>${esc(n)}</b><small>Nummer zuordnen</small></div>${ICON.pen}</button>`).join("")}</div>` : ""}
     <div class="sheet-actions"><button class="btn grow" type="button" data-act="closesheet-btn">Schließen</button></div>`);
 }
-function openKsEdit(nr, name) {
-  const e = nr ? kstamm()[nr] : null;
-  openSheet(`<h3>${e ? "Kunde bearbeiten" : "Neuer Kunde"}</h3><p class="sub">${e ? "Wenn sich der Name ändert, bleibt der alte als „früher“ gespeichert." : "Nummer und Name eintragen."}</p>
-    <form class="form" id="ks-form" data-old="${esc(nr || "")}" data-from="${esc(name || "")}">
-      <div class="grid2"><div class="field"><label for="ks-nr">Kundennummer</label><input id="ks-nr" inputmode="numeric" autocomplete="off" value="${esc(e ? e.nr : "")}" required></div>
-        <div class="field"><label for="ks-name">Name</label><input id="ks-name" autocomplete="off" value="${esc(e ? e.name : name || "")}" required></div></div>
+const KS_F = [["adr", "Adresse / Baustelle", "z. B. Dorfstraße 5, 5602 Wagrain"], ["kontakt", "Ansprechpartner", "z. B. Herr Huber"], ["tel", "Telefon", "z. B. 0664 1234567"], ["mail", "E-Mail", ""]];
+function openKsEdit(nr, name, pre) {
+  const e = nr ? kstamm()[nr] : null, v = { ...(e || {}), ...(pre || {}) };
+  openSheet(`<h3>${e ? "Kunde bearbeiten" : "Neuer Kunde"}</h3><p class="sub">${v.foto ? "Vergleiche die Felder mit dem Datenblatt. Tippe auf das Foto zum Vergrößern." : e ? "Wenn sich der Name ändert, bleibt der alte als „früher“ gespeichert." : "Nummer und Name eintragen, oder das Kundendatenblatt fotografieren."}</p>
+    ${v.foto ? `<div class="ks-foto" data-act="kszoom" data-id="${esc(v.foto)}"><span class="hint" style="display:block;padding:20px">Foto wird geladen …</span></div>` : ""}
+    <div class="btn-row" style="margin:0 0 12px"><button class="btn grow" type="button" data-act="ksfotocam">📷 ${v.foto ? "Neu fotografieren" : "Datenblatt fotografieren"}</button><button class="btn grow" type="button" data-act="ksfotogal">Aus Galerie</button></div>
+    <form class="form" id="ks-form" data-old="${esc(nr || "")}" data-from="${esc(name || "")}" data-foto="${esc(v.foto || "")}">
+      <div class="grid2"><div class="field"><label for="ks-nr">Kundennummer</label><input id="ks-nr" inputmode="numeric" autocomplete="off" value="${esc(v.nr || "")}" required></div>
+        <div class="field"><label for="ks-name">Name</label><input id="ks-name" autocomplete="off" value="${esc(v.name || name || "")}" required></div></div>
+      ${KS_F.map(([k, l, ph]) => `<div class="field"><label for="ks-${k}">${l}</label><input id="ks-${k}" autocomplete="off" ${k === "tel" ? 'inputmode="tel"' : k === "mail" ? 'inputmode="email"' : ""} value="${esc(v[k] || "")}" placeholder="${esc(ph)}">${k === "tel" && v.tel ? `<a class="ks-tel" href="tel:${esc(v.tel.replace(/[^\d+]/g, ""))}">📞 Anrufen</a>` : ""}</div>`).join("")}
+      <div class="field"><label for="ks-notiz">Notiz</label><textarea id="ks-notiz" placeholder="z. B. Schlüssel beim Nachbarn, Zufahrt über Hof">${esc(v.notiz || "")}</textarea></div>
       ${e && (e.alt || []).length ? `<p class="hint" style="margin:0">Früher: ${esc(e.alt.join(", "))}</p>` : ""}
+      ${pre && pre.ocr ? `<p class="hint" style="margin:0">✨ Einige Felder wurden aus dem Foto vorausgefüllt. Bitte prüfen.</p>` : ""}
       <div id="ks-err" class="err" hidden></div>
       <div class="sheet-actions"><button class="btn primary grow" type="submit">Speichern</button><button class="btn grow" type="button" data-act="ksopen">Zurück</button></div>
       ${e ? `<button class="btn ghost" type="button" data-act="ksdel" data-nr="${esc(e.nr)}" style="width:100%;color:var(--danger)">Aus Kundenliste löschen</button>` : ""}
     </form>`);
+  if (v.foto) ksFotoShow(v.foto);
+}
+async function ksFotoShow(id) {
+  const box = document.querySelector(".ks-foto"); if (!box) return;
+  const f = await fotoGet(id).catch(() => null);
+  if (!f || f.del) { box.innerHTML = `<span class="hint" style="display:block;padding:20px">Foto nicht gefunden.</span>`; return; }
+  let u = thumbUrls.get(id); if (!u) { u = URL.createObjectURL(fotoBlob(f)); thumbUrls.set(id, u); }
+  box.innerHTML = `<img src="${u}" alt="Kundendatenblatt"><span class="zoom">🔍 Tippen zum Vergrößern</span>`;
+}
+/* Formularinhalt merken, bevor das Foto aufgenommen wird */
+let ksFotoFor = null;
+function ksDraft() {
+  const f = $("ks-form"); if (!f) return { nr: "", name: "", draft: {} };
+  const d = { nr: $("ks-nr").value.trim(), name: $("ks-name").value.trim(), notiz: $("ks-notiz").value, foto: f.dataset.foto || "" };
+  for (const [k] of KS_F) d[k] = $("ks-" + k).value.trim();
+  return { nr: f.dataset.old, name: f.dataset.from, draft: d };
+}
+/* Texterkennung nur, wenn das Handy sie eingebaut hat (ohne Internet, ohne fremden Dienst) */
+async function ksOcr(blob) {
+  if (!("TextDetector" in window)) return "";
+  try { const bmp = await createImageBitmap(blob), r = await new window.TextDetector().detect(bmp); if (bmp.close) bmp.close(); return r.map(x => x.rawValue).join("\n"); } catch (e) { return ""; }
+}
+function ksGuess(text) {
+  const g = {}, lines = String(text || "").split(/\n/).map(l => l.trim()).filter(Boolean);
+  if (!lines.length) return g;
+  const all = lines.join("\n");
+  const nr = all.match(/(?:Kommission|Komm\.?|Auftrag|Kunden)[^\d\n]{0,20}(\d{4,6})/i) || all.match(/\b(2\d{4})\b/); if (nr) g.nr = nr[1];
+  const mail = all.match(/[\w.+-]+@[\w-]+\.[\w.]+/); if (mail) g.mail = mail[0];
+  const tel = all.match(/(?:Tel|Telefon|Mobil|Handy)[.:\s]*(\+?[\d][\d \/-]{6,}\d)/i) || all.match(/(\+43[\d \/-]{6,}\d|\b0\d{2,4}[ \/-]?\d{3,}[\d \/-]*\d)/); if (tel) g.tel = tel[1].trim();
+  const adr = lines.find(l => /\b\d{4}\s+[A-ZÄÖÜ][a-zäöüß]/.test(l)); if (adr) { const i = lines.indexOf(adr), prev = lines[i - 1]; g.adr = prev && /\d/.test(prev) && !/@/.test(prev) && prev !== (tel && tel[0]) ? `${prev}, ${adr}` : adr; }
+  const name = all.match(/(?:Kunde|Name|Bauherr|Kommission\s*Name)[:\s]+([^\n]{3,50})/i); if (name) g.name = name[1].trim();
+  return g;
+}
+async function ksFotoFiles(files) {
+  const ctx = ksFotoFor || { nr: "", name: "", draft: {} }; ksFotoFor = null;
+  const file = files.find(f => !f.type || f.type.startsWith("image/")); if (!file) return;
+  toast("Datenblatt wird gespeichert …");
+  try {
+    const blob = await fotoShrink(file), data = await blob.arrayBuffer(), at = Date.now(), id = `kd-${at}-${Math.random().toString(36).slice(2, 8)}`;
+    await fotoPut({ id, ds: "kunde", at, type: blob.type || "image/jpeg", data });
+    const old = ctx.draft.foto; if (old && old !== id && !(Object.values(kstamm()).some(e => e.foto === old))) fotoTx("readwrite", st => st.delete(old)).catch(() => {});
+    const guess = ksGuess(await ksOcr(blob)), pre = { ...ctx.draft, foto: id };
+    let used = false; for (const [k, val] of Object.entries(guess)) if (val && !pre[k]) { pre[k] = val; used = true; }
+    if (used) pre.ocr = true;
+    openKsEdit(ctx.nr, ctx.name, pre);
+  } catch (e) { toast(`Foto konnte nicht gespeichert werden (${(e && e.message) || "Fehler"}).`); }
 }
 function openAusz() {
   const list = auszahlungen();
@@ -2813,8 +2873,12 @@ document.addEventListener("click", async e => {
     case "kdnote": openKdNote(+el.dataset.i); break;
     case "ksopen": openKstamm(); break;
     case "ausz": openAusz(); break;
-    case "fotoadd": fotoTarget = el.dataset.ds; fotoTargetK = el.dataset.k || fotoAutoK(el.dataset.ds); $("foto-cam").click(); break;
-    case "fotogal": fotoTarget = el.dataset.ds; fotoTargetK = el.dataset.k || fotoAutoK(el.dataset.ds); $("foto-file").click(); break;
+    case "ksfotonew": ksFotoFor = { nr: "", name: "", draft: {} }; $("foto-cam").click(); break;
+    case "ksfotocam": ksFotoFor = ksDraft(); $("foto-cam").click(); break;
+    case "ksfotogal": ksFotoFor = ksDraft(); $("foto-file").click(); break;
+    case "kszoom": el.classList.toggle("big"); break;
+    case "fotoadd": ksFotoFor = null; fotoTarget = el.dataset.ds; fotoTargetK = el.dataset.k || fotoAutoK(el.dataset.ds); $("foto-cam").click(); break;
+    case "fotogal": ksFotoFor = null; fotoTarget = el.dataset.ds; fotoTargetK = el.dataset.k || fotoAutoK(el.dataset.ds); $("foto-file").click(); break;
     case "fotoview": openFoto(el.dataset.id); break;
     case "tmsync": tmSync(true); break;
     case "appupdate": { el.disabled = true; el.textContent = "Wird aktualisiert …";
@@ -2839,7 +2903,7 @@ document.addEventListener("click", async e => {
     case "auszdel": { S.settings.auszahlungen = (S.settings.auszahlungen || []).filter(a => a.ds !== el.dataset.ds); saveSettings(); toast("Auszahlung entfernt. Das Zeitkonto rechnet wieder durch."); openAusz(); render(); break; }
     case "kspaste": openKsPaste(); break;
     case "ksedit": openKsEdit(el.dataset.nr, el.dataset.name); break;
-    case "ksdel": { const st = { ...kstamm() }; delete st[el.dataset.nr]; S.settings.kstamm = st; saveSettings(); toast(`Kunde ${el.dataset.nr} aus der Liste gelöscht. Alte Einträge behalten die Nummer.`); openKstamm(); break; }
+    case "ksdel": { const st = { ...kstamm() }; if (st[el.dataset.nr] && st[el.dataset.nr].foto) fotoTx("readwrite", s2 => s2.delete(st[el.dataset.nr].foto)).catch(() => {}); delete st[el.dataset.nr]; S.settings.kstamm = st; saveSettings(); toast(`Kunde ${el.dataset.nr} aus der Liste gelöscht. Alte Einträge behalten die Nummer.`); openKstamm(); break; }
     case "betrieb": {
       const ds = todayDs(), prev = getRec(ds), r = clone(prev || { kind: holidayName(ds) ? "feiertag" : "arbeit" }), now = nowHM();
       r.kunden = r.kunden || [];
@@ -2987,7 +3051,10 @@ document.addEventListener("submit", e => {
     const st = { ...kstamm() }, e = old ? st[old] : null;
     if (old && old !== nr) delete st[old];
     const alt = e ? [...new Set([...(e.alt || []), ...(normName(e.name) !== normName(name) ? [e.name] : [])])] : (f.dataset.from && normName(f.dataset.from) !== normName(name) ? [f.dataset.from] : []);
-    st[nr] = { nr, name, alt: alt.filter(a => normName(a) !== normName(name)), at: Date.now() };
+    const extra = { foto: f.dataset.foto || "", notiz: $("ks-notiz").value.trim() }; for (const [k] of KS_F) extra[k] = $("ks-" + k).value.trim();
+    for (const k in extra) if (!extra[k]) delete extra[k];
+    if (e && e.foto && e.foto !== extra.foto) fotoTx("readwrite", s2 => s2.delete(e.foto)).catch(() => {});
+    st[nr] = { nr, name, alt: alt.filter(a => normName(a) !== normName(name)), at: Date.now(), ...extra };
     S.settings.kstamm = st; saveSettings();
     // Einsätze mit geänderter Nummer mitziehen
     if (old && old !== nr) for (const mk in S.months) { let ch = false; for (const dd in S.months[mk].days) for (const k of S.months[mk].days[dd].kunden || []) if (k.nr === old) { k.nr = nr; ch = true; } if (ch) { S.months[mk].updatedAt = Date.now(); scheduleRemote("m-" + mk); } }
